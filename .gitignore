@@ -1,0 +1,16 @@
+# AI tools - Claude Code
+.claude/
+.claude.log
+**/.claude/
+**/.claude.log
+
+# AI tools - Opencode
+opencode.json
+**/opencode.json
+
+# AI tools - Mimir
+mimir-key
+**/mimir-key
+
+# AI Project Documentation
+AGENTS.md
