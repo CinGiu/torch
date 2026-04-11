@@ -1,0 +1,31 @@
+services:
+  pipeline:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_ADDR=redis:6379
+      - CONFIG_PATH=/data/config.json
+    volumes:
+      - pipeline_data:/data        # persiste config.json
+      - workspaces:/workspaces     # workspace temporanei per issue
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis_data:/data
+
+volumes:
+  pipeline_data:
+  workspaces:
+  redis_data:
