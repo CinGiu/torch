@@ -159,6 +159,8 @@ func setupWorkspace(workspace string, opencodeCfgTemplate string) error {
 
 // mergeOpencodePermission takes the user's opencode.json template (may be empty)
 // and ensures permission["*"] = "allow" is set, returning the merged JSON.
+// Any values containing {file:...} references are stripped — those files do not
+// exist in the workspace and would cause opencode to fail on startup.
 func mergeOpencodePermission(template string) (string, error) {
 	base := map[string]interface{}{}
 	if template != "" {
@@ -166,6 +168,10 @@ func mergeOpencodePermission(template string) (string, error) {
 			return "", fmt.Errorf("invalid opencode_config JSON: %w", err)
 		}
 	}
+
+	// Strip {file:...} references recursively
+	stripFileRefs(base)
+
 	// Ensure permission map exists and has * = allow
 	perm, _ := base["permission"].(map[string]interface{})
 	if perm == nil {
@@ -179,4 +185,19 @@ func mergeOpencodePermission(template string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+// stripFileRefs removes any map keys whose string value contains a {file:...} pattern.
+func stripFileRefs(m map[string]interface{}) {
+	for k, v := range m {
+		switch val := v.(type) {
+		case string:
+			if strings.Contains(val, "{file:") {
+				slog.Warn("stripping {file:...} reference from opencode config", "key", k)
+				delete(m, k)
+			}
+		case map[string]interface{}:
+			stripFileRefs(val)
+		}
+	}
 }
