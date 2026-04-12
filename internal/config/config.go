@@ -66,7 +66,11 @@ func (a *AgentConfig) MergedEnv(extraEnv map[string]string) []string {
 
 	switch a.CLI {
 	case "claude":
-		// auth comes from ~/.claude mounted into the container — no token injection needed
+		// If a token is explicitly set (remote server), inject it.
+		// Otherwise auth comes from ~/.claude mounted into the container.
+		if a.APIKey != "" {
+			env = setEnv(env, "CLAUDE_CODE_OAUTH_TOKEN", a.APIKey)
+		}
 	case "opencode":
 		if a.APIKey != "" {
 			env = setEnv(env, "OPENCODE_API_KEY", a.APIKey)
