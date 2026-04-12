@@ -227,7 +227,7 @@ function AgentCard({ role, config, onChange }) {
         <Toggle value={config.cli} onChange={handleCliChange} />
       </div>
       {config.cli === "claude" && (
-        <Field label="Anthropic API Key" value={config.api_key || ""} onChange={v => set("api_key", v)} type="password" placeholder="sk-ant-..." isCode />
+        <Field label="OAuth Token" value={config.api_key || ""} onChange={v => set("api_key", v)} type="password" placeholder="oc-ant-..." hint="Generate with: claude setup-token" isCode />
       )}
       {config.cli === "opencode" && (
         <div style={{ padding: "10px 14px", background: colors.input, border: `1px solid ${colors.border}`, borderRadius: 6, marginBottom: 16 }}>

@@ -67,7 +67,7 @@ func (a *AgentConfig) MergedEnv(extraEnv map[string]string) []string {
 	switch a.CLI {
 	case "claude":
 		if a.APIKey != "" {
-			env = setEnv(env, "ANTHROPIC_API_KEY", a.APIKey)
+			env = setEnv(env, "CLAUDE_CODE_OAUTH_TOKEN", a.APIKey)
 		}
 	case "opencode":
 		if a.APIKey != "" {
