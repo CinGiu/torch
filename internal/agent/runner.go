@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"ai-pipeline/internal/config"
-	"ai-pipeline/internal/livelog"
-	"ai-pipeline/internal/types"
+	"torch/internal/config"
+	"torch/internal/livelog"
+	"torch/internal/types"
 )
 
 type Runner struct {

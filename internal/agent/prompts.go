@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"ai-pipeline/internal/types"
+	"torch/internal/types"
 )
 
 func applyCommands(prompt, lintCmd, testCmd string) string {

@@ -22,7 +22,7 @@ COPY web/     web/
 COPY --from=frontend-builder /app/frontend/dist/ web/dist/
 
 RUN go mod tidy && \
-    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /pipeline ./cmd/server
+    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /torch ./cmd/server
 
 # ─── Stage 3: Final runtime image ────────────────────────────────────────────
 # node:20-slim is Debian-based (glibc) — required for opencode's Linux binary
@@ -59,11 +59,11 @@ RUN npm install -g @anthropic-ai/claude-code
 RUN curl -fsSL https://opencode.ai/install | bash && \
     ln -s /root/.opencode/bin/opencode /usr/local/bin/opencode
 
-# ── Copy pipeline binary ─────────────────────────────────────────────────────
-COPY --from=go-builder /pipeline /usr/local/bin/pipeline
+# ── Copy torch binary ────────────────────────────────────────────────────────
+COPY --from=go-builder /torch /usr/local/bin/torch
 
 RUN mkdir -p /workspaces /data
 
 EXPOSE 8080
 
-CMD ["pipeline"]
+CMD ["torch"]

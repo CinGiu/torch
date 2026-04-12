@@ -1,4 +1,4 @@
-# Agent Coordinator
+# Torch
 
 A self-hosted orchestrator that autonomously implements GitHub issues using AI coding agents. Designed for mobile development teams (Flutter, React Native) but works with any stack.
 
@@ -102,8 +102,8 @@ The server host needs no SDKs installed. Flutter and all build tools run inside 
 ### 1. Clone and start
 
 ```bash
-git clone https://github.com/your-org/agent-coordinator
-cd agent-coordinator
+git clone https://github.com/your-org/torch
+cd torch
 docker compose up --build
 ```
 
@@ -179,8 +179,8 @@ If you use opencode with a custom LLM provider, paste the full `opencode.json` i
 
 ```bash
 # Copy to server
-scp docker-compose.yml user@server:~/agent-coordinator/
-ssh user@server "cd ~/agent-coordinator && docker compose up -d"
+scp docker-compose.yml user@server:~/torch/
+ssh user@server "cd ~/torch && docker compose up -d"
 ```
 
 For public webhook access, put a reverse proxy (nginx, Caddy) or Cloudflare Tunnel in front of port 8080.

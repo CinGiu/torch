@@ -1,4 +1,4 @@
-module ai-pipeline
+module torch
 
 go 1.22
 

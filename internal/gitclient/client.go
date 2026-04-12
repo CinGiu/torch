@@ -55,10 +55,10 @@ func (c *Client) run(dir string, args ...string) error {
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=AI Pipeline",
-		"GIT_AUTHOR_EMAIL=ai-pipeline@bot.local",
-		"GIT_COMMITTER_NAME=AI Pipeline",
-		"GIT_COMMITTER_EMAIL=ai-pipeline@bot.local",
+		"GIT_AUTHOR_NAME=Torch",
+		"GIT_AUTHOR_EMAIL=torch@bot.local",
+		"GIT_COMMITTER_NAME=Torch",
+		"GIT_COMMITTER_EMAIL=torch@bot.local",
 		"GIT_CONFIG_NOSYSTEM=1",
 		"HOME=/tmp",
 	)

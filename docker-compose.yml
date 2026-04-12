@@ -1,5 +1,5 @@
 services:
-  pipeline:
+  torch:
     build: .
     restart: unless-stopped
     ports:

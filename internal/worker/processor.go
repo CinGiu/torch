@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"ai-pipeline/internal/config"
-	"ai-pipeline/internal/gitclient"
-	"ai-pipeline/internal/githubclient"
-	"ai-pipeline/internal/pipeline"
+	"torch/internal/config"
+	"torch/internal/gitclient"
+	"torch/internal/githubclient"
+	"torch/internal/pipeline"
 
 	"github.com/hibiken/asynq"
 )
@@ -153,7 +153,7 @@ func setupWorkspace(workspace string, opencodeCfgTemplate string) error {
 	}
 	defer f.Close()
 
-	_, err = f.WriteString("\n# injected by ai-pipeline\nopencode.json\n")
+	_, err = f.WriteString("\n# injected by torch\nopencode.json\n")
 	return err
 }
 

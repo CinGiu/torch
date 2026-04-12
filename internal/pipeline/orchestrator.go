@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"strings"
 
-	"ai-pipeline/internal/agent"
-	"ai-pipeline/internal/config"
-	"ai-pipeline/internal/githubclient"
+	"torch/internal/agent"
+	"torch/internal/config"
+	"torch/internal/githubclient"
 )
 
 type Orchestrator struct {

@@ -8,8 +8,8 @@ import (
 	"io"
 	"net/http"
 
-	"ai-pipeline/internal/config"
-	"ai-pipeline/internal/worker"
+	"torch/internal/config"
+	"torch/internal/worker"
 )
 
 type Handler struct {

@@ -1,6 +1,6 @@
 package pipeline
 
-import "ai-pipeline/internal/types"
+import "torch/internal/types"
 
 // Re-export types from common package for backward compatibility
 type AgentStatus = types.AgentStatus

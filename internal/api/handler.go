@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"time"
 
-	"ai-pipeline/internal/config"
-	"ai-pipeline/internal/githubclient"
-	"ai-pipeline/internal/livelog"
-	"ai-pipeline/internal/worker"
+	"torch/internal/config"
+	"torch/internal/githubclient"
+	"torch/internal/livelog"
+	"torch/internal/worker"
 
 	"github.com/hibiken/asynq"
 )

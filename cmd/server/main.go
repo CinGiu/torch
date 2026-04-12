@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"ai-pipeline/internal/api"
-	"ai-pipeline/internal/config"
-	"ai-pipeline/internal/webhook"
-	"ai-pipeline/internal/worker"
-	"ai-pipeline/web"
+	"torch/internal/api"
+	"torch/internal/config"
+	"torch/internal/webhook"
+	"torch/internal/worker"
+	"torch/web"
 
 	"github.com/hibiken/asynq"
 )
