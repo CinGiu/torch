@@ -13,6 +13,7 @@ services:
       - ./data:/data
       - ./workspaces:/workspaces
       - flutter_pub_cache:/root/.pub-cache
+      - ~/.claude:/root/.claude:ro
     depends_on:
       redis:
         condition: service_healthy

@@ -227,21 +227,19 @@ function AgentCard({ role, config, onChange }) {
         <Toggle value={config.cli} onChange={handleCliChange} />
       </div>
       {config.cli === "claude" && (
-        <>
-          <Field label="OAuth Token" value={config.api_key || ""} onChange={v => set("api_key", v)} type="password" placeholder="oc-ant-..." isCode />
-          <div style={{ padding: "10px 14px", background: colors.input, border: `1px solid ${colors.border}`, borderRadius: 6, marginBottom: 16 }}>
-            <p style={{ margin: "0 0 6px", fontSize: 12, color: colors.muted, fontFamily: mono, letterSpacing: "0.08em", textTransform: "uppercase" }}>How to generate</p>
-            <p style={{ margin: 0, fontSize: 13, color: colors.text, fontFamily: mono, lineHeight: 1.8 }}>
-              1. Install Claude Code CLI on your machine<br />
-              2. Run <span style={{ color: colors.cyan }}>claude setup-token</span> in your terminal<br />
-              3. A browser window opens — log in with your Anthropic account<br />
-              4. Copy the token (starts with <span style={{ color: colors.cyan }}>oc-ant-</span>) and paste it above
-            </p>
-            <p style={{ margin: "8px 0 0", fontSize: 12, color: colors.muted, fontFamily: mono }}>
-              Requires a Claude Pro or Max subscription. Usage is included in your plan — no extra per-token charges.
-            </p>
-          </div>
-        </>
+        <div style={{ padding: "12px 16px", background: colors.input, border: `1px solid ${colors.border}`, borderRadius: 6, marginBottom: 16 }}>
+          <p style={{ margin: "0 0 8px", fontSize: 12, color: colors.muted, fontFamily: mono, letterSpacing: "0.08em", textTransform: "uppercase" }}>Authentication</p>
+          <p style={{ margin: "0 0 10px", fontSize: 13, color: colors.text, fontFamily: mono, lineHeight: 1.8 }}>
+            Torch uses your local Claude Code session — no token needed here.<br />
+            The <span style={{ color: colors.cyan }}>~/.claude</span> directory from your machine is mounted into the container automatically.
+          </p>
+          <p style={{ margin: "0 0 6px", fontSize: 12, color: colors.muted, fontFamily: mono, letterSpacing: "0.08em", textTransform: "uppercase" }}>One-time setup</p>
+          <p style={{ margin: 0, fontSize: 13, color: colors.text, fontFamily: mono, lineHeight: 1.8 }}>
+            1. Install Claude Code on your machine: <span style={{ color: colors.cyan }}>npm i -g @anthropic-ai/claude-code</span><br />
+            2. Log in once: run <span style={{ color: colors.cyan }}>claude</span> and complete the browser login<br />
+            3. Restart the container — it will pick up your session automatically
+          </p>
+        </div>
       )}
       {config.cli === "opencode" && (
         <div style={{ padding: "10px 14px", background: colors.input, border: `1px solid ${colors.border}`, borderRadius: 6, marginBottom: 16 }}>
