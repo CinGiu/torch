@@ -14,3 +14,26 @@ mimir-key
 
 # AI Project Documentation
 AGENTS.md
+
+# Pipeline workspaces (cloned repos, ephemeral)
+workspaces/
+
+# Pipeline data (config with API keys and tokens — do not commit)
+data/
+
+# Local env
+.env
+
+# OS
+.DS_Store
+**/.DS_Store
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+
+# Go embedded frontend (generated during Docker build)
+web/dist/
+
+# Local stack scaffolding
+stacks/

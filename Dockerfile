@@ -12,55 +12,56 @@ FROM golang:1.22-alpine AS go-builder
 
 WORKDIR /app
 
-# Copy go mod files first for layer caching
 COPY go.mod ./
 COPY go.sum* ./
 
-# Copy all Go source
 COPY cmd/     cmd/
 COPY internal/ internal/
 COPY web/     web/
 
-# Copy built frontend into the embed location
 COPY --from=frontend-builder /app/frontend/dist/ web/dist/
 
-# Download deps and build
 RUN go mod tidy && \
     CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /pipeline ./cmd/server
 
 # ─── Stage 3: Final runtime image ────────────────────────────────────────────
-FROM node:20-alpine
+# node:20-slim is Debian-based (glibc) — required for opencode's Linux binary
+FROM node:20-slim
 
 # Runtime dependencies
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    git-lfs \
     curl \
     bash \
     unzip \
-    xz
+    xz-utils \
+    ca-certificates \
+    libglu1-mesa \
+    && git lfs install \
+    && rm -rf /var/lib/apt/lists/*
 
-# ── Install Flutter ──────────────────────────────────────────────────────────
-ENV FLUTTER_VERSION=3.22.2
-ENV FLUTTER_HOME=/opt/flutter
-ENV PATH="$FLUTTER_HOME/bin:$PATH"
+# ── Install Flutter via git (works on both x64 and arm64) ────────────────────
+ARG FLUTTER_VERSION=3.29.3
+RUN git clone --depth 1 --branch ${FLUTTER_VERSION} \
+        https://github.com/flutter/flutter.git /opt/flutter && \
+    /opt/flutter/bin/flutter config --no-analytics && \
+    /opt/flutter/bin/flutter precache --no-android --no-ios --no-web
 
-RUN git clone https://github.com/flutter/flutter.git \
-      --depth 1 --branch stable $FLUTTER_HOME && \
-    flutter config --no-analytics && \
-    flutter precache --no-android --no-ios --no-web && \
-    flutter doctor || true
+ENV PATH="/opt/flutter/bin:/opt/flutter/bin/cache/dart-sdk/bin:$PATH"
+ENV FLUTTER_ROOT="/opt/flutter"
+ENV PUB_CACHE="/root/.pub-cache"
 
 # ── Install Claude Code CLI ──────────────────────────────────────────────────
 RUN npm install -g @anthropic-ai/claude-code
 
-# ── Install opencode CLI ─────────────────────────────────────────────────────
-# Uncomment and adjust if opencode is available on npm:
-# RUN npm install -g opencode-ai
+# ── Install opencode CLI (Linux binary via official installer) ────────────────
+RUN curl -fsSL https://opencode.ai/install | bash && \
+    ln -s /root/.opencode/bin/opencode /usr/local/bin/opencode
 
 # ── Copy pipeline binary ─────────────────────────────────────────────────────
 COPY --from=go-builder /pipeline /usr/local/bin/pipeline
 
-# Workspaces directory
 RUN mkdir -p /workspaces /data
 
 EXPOSE 8080

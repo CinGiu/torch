@@ -10,8 +10,6 @@ import (
 
 	"ai-pipeline/internal/config"
 	"ai-pipeline/internal/worker"
-
-	"github.com/gin-gonic/gin"
 )
 
 type Handler struct {
@@ -23,33 +21,44 @@ func NewHandler(cfgMgr *config.Manager, dispatcher *worker.Dispatcher) *Handler 
 	return &Handler{cfgMgr: cfgMgr, dispatcher: dispatcher}
 }
 
-func (h *Handler) Handle(c *gin.Context) {
-	body, err := io.ReadAll(c.Request.Body)
+func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot read body"})
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "cannot read body"})
 		return
 	}
 
 	cfg := h.cfgMgr.Get()
 
-	if !validateSignature(cfg.Github.WebhookSecret, c.GetHeader("X-Hub-Signature-256"), body) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
+	if !validateSignature(cfg.Github.WebhookSecret, r.Header.Get("X-Hub-Signature-256"), body) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid signature"})
 		return
 	}
 
-	if c.GetHeader("X-GitHub-Event") != "issues" {
-		c.JSON(http.StatusOK, gin.H{"status": "ignored"})
+	if r.Header.Get("X-GitHub-Event") != "issues" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ignored"})
 		return
 	}
 
 	var payload issuePayload
 	if err := json.Unmarshal(body, &payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid payload"})
+		return
+	}
+
+	if !cfg.Pipeline.Active {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "pipeline not active"})
 		return
 	}
 
 	if payload.Action != "labeled" || payload.Label.Name != cfg.Github.TriggerLabel {
-		c.JSON(http.StatusOK, gin.H{"status": "ignored"})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ignored"})
 		return
 	}
 
@@ -62,11 +71,13 @@ func (h *Handler) Handle(c *gin.Context) {
 	}
 
 	if err := h.dispatcher.Enqueue(task); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "queued", "issue": payload.Issue.Number})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"status": "queued", "issue": payload.Issue.Number})
 }
 
 func validateSignature(secret, sigHeader string, body []byte) bool {

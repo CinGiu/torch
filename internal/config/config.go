@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -18,15 +19,21 @@ type Config struct {
 }
 
 type PipelineConfig struct {
-	WorkspacesDir string `json:"workspaces_dir"`
-	MaxFixRounds  int    `json:"max_fix_rounds"`
+	WorkspacesDir  string            `json:"workspaces_dir"`
+	MaxFixRounds   int               `json:"max_fix_rounds"`
+	TestCommand    string            `json:"test_command"`
+	LintCommand    string            `json:"lint_command"`
+	Active         bool              `json:"active"`
+	OpencodeConfig string            `json:"opencode_config,omitempty"`
+	ExtraEnv       map[string]string `json:"extra_env,omitempty"` // injected into every agent process (e.g. PATH additions)
 }
 
 type GithubConfig struct {
-	Token         string `json:"token"`
-	WebhookSecret string `json:"webhook_secret"`
-	TriggerLabel  string `json:"trigger_label"`
-	BaseBranch    string `json:"base_branch"`
+	Token         string   `json:"token"`
+	WebhookSecret string   `json:"webhook_secret"`
+	TriggerLabel  string   `json:"trigger_label"`
+	BaseBranch    string   `json:"base_branch"`
+	Repos         []string `json:"repos"`
 }
 
 type AgentConfig struct {
@@ -37,12 +44,25 @@ type AgentConfig struct {
 	Model        string   `json:"model"`
 	SystemPrompt string   `json:"system_prompt"`
 	MaxFixRounds int      `json:"max_fix_rounds"`
+	TimeoutSecs  int      `json:"timeout_secs"` // 0 = use default (1800)
 }
 
-// MergedEnv builds the env slice for exec.Cmd, injecting the right
-// credentials depending on which CLI is configured.
-func (a *AgentConfig) MergedEnv() []string {
+// MergedEnv builds the env slice for exec.Cmd, injecting credentials and
+// any extra env vars from the pipeline config (e.g. PATH additions).
+func (a *AgentConfig) MergedEnv(extraEnv map[string]string) []string {
 	env := os.Environ()
+
+	// Inject extra env vars first (e.g. prepend to PATH)
+	for k, v := range extraEnv {
+		if k == "PATH" {
+			// Prepend to existing PATH rather than replace
+			existing := os.Getenv("PATH")
+			if existing != "" {
+				v = v + ":" + existing
+			}
+		}
+		env = setEnv(env, k, v)
+	}
 
 	switch a.CLI {
 	case "claude":
@@ -84,6 +104,8 @@ func defaultConfig() Config {
 		Pipeline: PipelineConfig{
 			WorkspacesDir: "/workspaces",
 			MaxFixRounds:  3,
+			TestCommand:   "flutter test",
+			LintCommand:   "flutter analyze",
 		},
 		Github: GithubConfig{
 			TriggerLabel: "ai-implement",
@@ -92,20 +114,23 @@ func defaultConfig() Config {
 		Agents: map[string]AgentConfig{
 			"developer": {
 				CLI:          "claude",
-				Args:         []string{"--print", "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep", "--max-turns", "40"},
+				Args:         []string{"--print", "--dangerously-skip-permissions", "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep", "--max-turns", "40"},
 				MaxFixRounds: 3,
+				TimeoutSecs:  1800,
 				SystemPrompt: defaultDeveloperPrompt,
 			},
 			"tester": {
 				CLI:          "claude",
-				Args:         []string{"--print", "--allowedTools", "Bash,Read,Glob,Grep", "--max-turns", "20"},
+				Args:         []string{"--print", "--dangerously-skip-permissions", "--allowedTools", "Bash,Read,Glob,Grep", "--max-turns", "20"},
 				MaxFixRounds: 3,
+				TimeoutSecs:  1200,
 				SystemPrompt: defaultTesterPrompt,
 			},
 			"reviewer": {
 				CLI:          "claude",
-				Args:         []string{"--print", "--allowedTools", "Bash,Read,Glob,Grep", "--max-turns", "20"},
+				Args:         []string{"--print", "--dangerously-skip-permissions", "--allowedTools", "Bash,Read,Glob,Grep", "--max-turns", "20"},
 				MaxFixRounds: 3,
+				TimeoutSecs:  1200,
 				SystemPrompt: defaultReviewerPrompt,
 			},
 		},
@@ -161,7 +186,7 @@ func (m *Manager) save() error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(fmt.Sprintf("%s/..", m.path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(m.path), 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(m.path, data, 0o600)
@@ -171,43 +196,48 @@ func (m *Manager) save() error {
 // Default prompts
 // ──────────────────────────────────────────────
 
-const defaultDeveloperPrompt = `You are an expert Flutter developer working on a production app.
+const defaultDeveloperPrompt = `You are an expert developer working on a production codebase.
 
 Your task:
 1. Explore the codebase — understand existing patterns, architecture, naming conventions
 2. Implement the feature described in the issue
-3. Write appropriate tests (unit or widget)
-4. Run 'flutter analyze' — fix ALL warnings and errors
-5. Run 'flutter test' — all tests must pass
+3. Write appropriate unit tests
+4. Run '{lint_command}' — fix ALL warnings and errors
+5. Run '{test_command}' — all tests must pass
 6. Stage all changes with 'git add .'
 
 Rules:
 - Match existing code style exactly
 - Minimal, focused changes — do not over-engineer
-- Do not modify pubspec.yaml unless strictly necessary
+- Do not modify dependency files unless strictly necessary
 - Never break existing tests
 - Do NOT commit — only stage changes`
 
-const defaultTesterPrompt = `You are a senior Flutter QA engineer.
+const defaultTesterPrompt = `You are a senior QA engineer. Your job is to WRITE tests, not just run them.
 
 Steps:
 1. Read the issue description and understand expected behavior
-2. Review all staged/modified files (use 'git diff --staged')
-3. Run 'flutter analyze' and report any issues
-4. Run 'flutter test' and report any failures
-5. Check test coverage — are new features adequately tested?
-6. Check edge cases — are they handled?
+2. Run 'git diff --staged' to see exactly what the developer implemented
+3. Identify all new functions, classes, and logic paths that lack test coverage
+4. Write unit tests (and integration tests where appropriate) that cover:
+   - The happy path for every new feature
+   - Edge cases and boundary conditions
+   - Error/failure scenarios
+5. Follow existing test conventions and file structure in the project
+6. Stage all new/modified test files with 'git add .'
+7. Run '{lint_command}' — fix any issues in the test files you wrote
+8. Run '{test_command}' — all tests must pass before you finish
 
 Output format (respond with this exact JSON structure):
 {
   "status": "success" | "failed",
-  "feedback": "detailed description of what must be fixed (empty if success)",
-  "issues": ["issue 1", "issue 2"]
+  "feedback": "if failed: what tests are still missing or failing, and why",
+  "issues": ["specific issue 1", "specific issue 2"]
 }
 
-Be strict. If tests are missing or coverage is inadequate, return failed.`
+Return failed if: any test fails, you could not write meaningful tests, or critical paths are still untested.`
 
-const defaultReviewerPrompt = `You are a senior Flutter architect doing a code review.
+const defaultReviewerPrompt = `You are a senior software architect doing a code review.
 
 Steps:
 1. Run 'git diff --staged' to see all changes

@@ -20,6 +20,51 @@ func NewClient(token string) *Client {
 	}
 }
 
+// ── Issues ────────────────────────────────────────────────────────────────────
+
+type IssueItem struct {
+	Number int      `json:"number"`
+	Title  string   `json:"title"`
+	Body   string   `json:"body"`
+	Labels []string `json:"labels"`
+	URL    string   `json:"url"`
+}
+
+func (c *Client) ListIssues(ctx context.Context, fullName string) ([]IssueItem, error) {
+	owner, repo, err := splitRepo(fullName)
+	if err != nil {
+		return nil, err
+	}
+	issues, _, err := c.gh.Issues.ListByRepo(ctx, owner, repo, &github.IssueListByRepoOptions{
+		State:       "open",
+		ListOptions: github.ListOptions{PerPage: 100},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list issues: %w", err)
+	}
+
+	var result []IssueItem
+	for _, issue := range issues {
+		if issue.IsPullRequest() {
+			continue
+		}
+		labels := make([]string, 0, len(issue.Labels))
+		for _, l := range issue.Labels {
+			labels = append(labels, l.GetName())
+		}
+		result = append(result, IssueItem{
+			Number: issue.GetNumber(),
+			Title:  issue.GetTitle(),
+			Body:   issue.GetBody(),
+			Labels: labels,
+			URL:    issue.GetHTMLURL(),
+		})
+	}
+	return result, nil
+}
+
+// ── PRs ───────────────────────────────────────────────────────────────────────
+
 type PRRequest struct {
 	RepoFullName string
 	Title        string

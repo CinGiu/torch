@@ -16,6 +16,10 @@ func NewClient(ghToken string) *Client {
 }
 
 func (c *Client) Clone(cloneURL, dest string) error {
+	// Remove stale workspace if present (e.g. left by KEEP_WORKSPACE=true).
+	if err := os.RemoveAll(dest); err != nil {
+		return fmt.Errorf("cleanup before clone: %w", err)
+	}
 	authedURL := strings.Replace(
 		cloneURL,
 		"https://",
@@ -30,9 +34,13 @@ func (c *Client) CreateBranch(workspace, branch string) error {
 }
 
 func (c *Client) CommitAndPush(workspace, branch, message string) error {
+	// Stage everything, then explicitly unstage injected pipeline files
 	if err := c.run(workspace, "git", "add", "."); err != nil {
 		return err
 	}
+	// Unstage pipeline-injected files so they never appear in the PR
+	_ = c.run(workspace, "git", "restore", "--staged", "opencode.json")
+	_ = c.run(workspace, "git", "restore", "--staged", "mimir-key")
 	if err := c.run(workspace, "git", "commit", "--allow-empty", "-m", message); err != nil {
 		return err
 	}

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"ai-pipeline/internal/config"
@@ -45,7 +47,12 @@ func (p *Processor) ProcessIssueTask(ctx context.Context, t *asynq.Task) error {
 	}
 	sm := githubclient.NewStatusManager(ghClient, owner, repo)
 
+	keepWorkspace := os.Getenv("KEEP_WORKSPACE") == "true"
 	defer func() {
+		if keepWorkspace {
+			log.Info("workspace kept for inspection", "path", workspace)
+			return
+		}
 		if err := gitClient.Cleanup(workspace); err != nil {
 			log.Error("cleanup failed", "err", err)
 		}
@@ -67,6 +74,11 @@ func (p *Processor) ProcessIssueTask(ctx context.Context, t *asynq.Task) error {
 	// Branch
 	if err := gitClient.CreateBranch(workspace, branchName); err != nil {
 		return fmt.Errorf("branch: %w", err)
+	}
+
+	// Inject workspace config files (opencode permissions, etc.)
+	if err := setupWorkspace(workspace, cfg.Pipeline.OpencodeConfig); err != nil {
+		log.Warn("workspace setup failed", "err", err)
 	}
 
 	// Run multi-agent pipeline
@@ -118,4 +130,53 @@ func splitRepo(fullName string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid repo name: %s", fullName)
 	}
 	return parts[0], parts[1], nil
+}
+
+// setupWorkspace injects tool config files into the workspace before agents run.
+// Files are excluded from git tracking via .git/info/exclude so they are never committed.
+func setupWorkspace(workspace string, opencodeCfgTemplate string) error {
+	// Build opencode.json: start from user-provided template or empty object,
+	// then ensure permission.* = allow is set.
+	opencodeCfg, err := mergeOpencodePermission(opencodeCfgTemplate)
+	if err != nil {
+		return fmt.Errorf("merge opencode config: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "opencode.json"), []byte(opencodeCfg), 0o644); err != nil {
+		return fmt.Errorf("write opencode.json: %w", err)
+	}
+
+	// Exclude injected files from git without touching the repo's .gitignore
+	excludePath := filepath.Join(workspace, ".git", "info", "exclude")
+	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("open .git/info/exclude: %w", err)
+	}
+	defer f.Close()
+
+	_, err = f.WriteString("\n# injected by ai-pipeline\nopencode.json\n")
+	return err
+}
+
+// mergeOpencodePermission takes the user's opencode.json template (may be empty)
+// and ensures permission["*"] = "allow" is set, returning the merged JSON.
+func mergeOpencodePermission(template string) (string, error) {
+	base := map[string]interface{}{}
+	if template != "" {
+		if err := json.Unmarshal([]byte(template), &base); err != nil {
+			return "", fmt.Errorf("invalid opencode_config JSON: %w", err)
+		}
+	}
+	// Ensure permission map exists and has * = allow
+	perm, _ := base["permission"].(map[string]interface{})
+	if perm == nil {
+		perm = map[string]interface{}{}
+	}
+	perm["*"] = "allow"
+	base["permission"] = perm
+
+	out, err := json.MarshalIndent(base, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }

@@ -1,95 +1,212 @@
-# AI Dev Pipeline
+# Agent Coordinator
 
-Pipeline di sviluppo autonoma che implementa GitHub issue usando agenti AI (Claude Code CLI / opencode).
+A self-hosted orchestrator that autonomously implements GitHub issues using AI coding agents. Designed for mobile development teams (Flutter, React Native) but works with any stack.
 
-## Stack
+You connect it to a GitHub repository, and when an issue is labeled or manually triggered from the UI, the system clones the repo, runs a three-agent pipeline (Developer → Tester → Reviewer), and opens a pull request with the implementation — without any human intervention.
 
-- **Go** — webhook server + worker pool (Asynq)
-- **Redis** — task queue
-- **React** — UI di configurazione
-- **Claude Code CLI / opencode** — agenti AI
+---
 
-## Quick start
+## How it works
+
+```
+GitHub Issue
+     │
+     ▼
+┌─────────────┐
+│  Webhook /  │  label trigger or manual UI trigger
+│  UI Trigger │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────────────────────────────────────────────┐
+│                   Pipeline (per issue)              │
+│                                                     │
+│  ┌───────────┐    ┌──────────┐    ┌──────────────┐  │
+│  │ Developer │ →  │  Tester  │ →  │   Reviewer   │  │
+│  │           │    │          │    │              │  │
+│  │ Implements│    │ Writes & │    │ Code review  │  │
+│  │ the issue │    │ runs     │    │ architecture │  │
+│  │           │    │ tests    │    │ security     │  │
+│  └───────────┘    └──────────┘    └──────────────┘  │
+│       ↑                │                │           │
+│       └────── fix ─────┴────── fix ─────┘           │
+│              (up to N rounds)                       │
+└─────────────────────────────────────────────────────┘
+       │
+       ▼
+  Pull Request opened on GitHub
+```
+
+Each agent is an independent AI CLI process (`claude` or `opencode`) running in an isolated workspace. Agents communicate only through the filesystem and git — the orchestrator coordinates them sequentially and feeds failure feedback back to the Developer for fix rounds.
+
+---
+
+## Features
+
+- **Multi-agent pipeline** — Developer implements, Tester writes and runs tests, Reviewer checks code quality
+- **Automatic fix loops** — if Tester or Reviewer fails, the Developer gets the feedback and retries
+- **GitHub integration** — webhook trigger, issue labels (`ai: in-progress`, `ai: testing`, `ai: done`, …), automatic PR
+- **UI monitor** — web dashboard to start/stop the pipeline, browse issues, trigger runs manually, and watch live agent output
+- **Any AI CLI** — works with Claude Code (`claude`) and opencode; configure per-agent
+- **Any stack** — configurable `test_command` and `lint_command`; Flutter, Node.js, Python, Go, etc.
+- **Concurrent runs** — configurable worker concurrency; each issue runs in its own isolated workspace
+- **Retry + timeout** — each agent retries up to 3 times with a configurable timeout before failing
+- **Self-hosted** — everything runs in Docker; no external services except Redis (bundled) and the AI API
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Docker Compose                                             │
+│                                                             │
+│  ┌─────────────────────────────────────────┐  ┌─────────┐  │
+│  │  pipeline container                     │  │  Redis  │  │
+│  │                                         │  │         │  │
+│  │  ┌──────────┐  ┌────────┐  ┌────────┐   │  │  task   │  │
+│  │  │ Go HTTP  │  │ Asynq  │  │ Agent  │   │  │  queue  │  │
+│  │  │ server   │  │ worker │  │ runner │   │  │         │  │
+│  │  │          │  │ pool   │  │        │   │  └─────────┘  │
+│  │  │ React UI │  │        │  │ claude │   │               │
+│  │  │ embedded │  │        │  │   or   │   │               │
+│  │  └──────────┘  └────────┘  │opencode│   │               │
+│  │                            └────────┘   │               │
+│  └─────────────────────────────────────────┘               │
+│                          │                                  │
+│                    ./workspaces/   (bind mount)             │
+│                    ./data/         (bind mount)             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+- **Go HTTP server** — serves the React UI and REST API, handles GitHub webhooks
+- **Asynq worker pool** — processes issues concurrently from the Redis queue
+- **Agent runner** — spawns the AI CLI as a subprocess, streams output, enforces timeouts, retries on failure
+- **React UI** — setup wizard + live dashboard; embedded in the Go binary via `go:embed`
+
+---
+
+## Requirements
+
+- **Server**: Docker + Docker Compose (any Linux host, x64 or ARM64)
+- **AI CLI**: Claude Code or opencode — installed inside the Docker image automatically
+- **GitHub**: a fine-grained personal access token with repository permissions
+- **API key**: Anthropic API key (for Claude) or your provider's key (for opencode)
+
+The server host needs no SDKs installed. Flutter and all build tools run inside the Docker image.
+
+---
+
+## Getting started
+
+### 1. Clone and start
 
 ```bash
-docker compose up -d --build
+git clone https://github.com/your-org/agent-coordinator
+cd agent-coordinator
+docker compose up --build
 ```
 
-Apri **http://localhost:8080** e configura:
+The first build downloads Flutter and the AI CLIs — expect a few minutes.
 
-1. **Agents** — scegli `claude` o `opencode` per ogni agente, inserisci le API key, personalizza i system prompt
-2. **GitHub** — inserisci il token e il webhook secret, premi **save config**
-3. **Export** — scarica il `docker-compose.yml` aggiornato se necessario
-
-## Configurazione GitHub
-
-### 1. Fine-grained token
-
-GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token
-
-Permessi richiesti sul repo target:
-
-| Permesso       | Livello       |
-|----------------|---------------|
-| Contents       | Read & write  |
-| Pull requests  | Read & write  |
-| Issues         | Read & write  |
-| Metadata       | Read          |
-
-### 2. Webhook
-
-repo → Settings → Webhooks → Add webhook
-
-| Campo        | Valore                                     |
-|--------------|--------------------------------------------|
-| Payload URL  | `https://your-server:8080/webhook/github`  |
-| Content type | `application/json`                         |
-| Secret       | stessa stringa inserita nella UI           |
-| Events       | `Issues`                                   |
-
-## Trigger
-
-Aggiungi la label `ai-implement` (o quella configurata nella UI) a una issue — la pipeline parte automaticamente.
-
-## Flusso
+### 2. Open the UI
 
 ```
-Issue labeled  →  [Developer]  →  [Tester]  →  [Reviewer]
-                       ↑               |               |
-                       └───── fix ─────┘               |
-                       ↑                               |
-                       └──────────── fix ──────────────┘
-                                      |
-                                   git push → PR aperta
+http://localhost:8080
 ```
 
-Ogni step di fallimento rimanda al developer con il feedback dettagliato.
-Il numero massimo di round di fix è configurabile per agente dalla UI.
+The setup wizard guides you through:
+1. **Agents** — choose `claude` or `opencode` for each role; enter API keys
+2. **GitHub** — paste your fine-grained token and webhook secret
+3. **Pipeline** — set `test_command` and `lint_command` for your stack
+4. **Launch** — activate the pipeline
 
-## Agenti
+### 3. Connect GitHub
 
-| Agente    | Ruolo                                        |
-|-----------|----------------------------------------------|
-| Developer | Implementa la feature, scrive i test         |
-| Tester    | Esegue `flutter test`, verifica la copertura |
-| Reviewer  | Code review su qualità e architettura        |
+In your repository → Settings → Webhooks → Add webhook:
+- Payload URL: `https://your-server:8080/webhook/github`
+- Content type: `application/json`
+- Events: **Issues**
+- Secret: the webhook secret you set in step 2
 
-## Sviluppo locale
+### 4. Trigger a run
+
+**Automatic**: add the configured trigger label (default: `ai-implement`) to any issue.
+
+**Manual**: go to the Issues tab in the dashboard, pick a repo, and click **▶ Run** next to any issue.
+
+---
+
+## Configuration
+
+All configuration is managed through the UI and persisted in `./data/config.json`.
+
+### GitHub token permissions
+
+| Permission | Level | Purpose |
+|---|---|---|
+| Contents | Read & write | clone + push branch |
+| Pull requests | Read & write | open the PR |
+| Issues | Read & write | labels + comments |
+| Metadata | Read | required |
+
+### Stack examples
+
+| Stack | Test command | Lint command |
+|---|---|---|
+| Flutter | `flutter test` | `flutter analyze` |
+| Node.js | `npm test` | `npm run lint` |
+| Python | `pytest --tb=short` | `ruff check .` |
+| Go | `go test ./...` | `go vet ./...` |
+
+### opencode provider (custom models)
+
+If you use opencode with a custom LLM provider, paste the full `opencode.json` in **Settings → Pipeline → Opencode Config**. It gets injected into every workspace before agents run, alongside `permission: {"*": "allow"}` so agents never pause for confirmation.
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `REDIS_ADDR` | `redis:6379` | Redis address |
+| `CONFIG_PATH` | `/data/config.json` | Config file path |
+| `CONCURRENCY` | `4` | Max parallel issues |
+| `LOG_LEVEL` | `info` | `info` or `debug` |
+| `KEEP_WORKSPACE` | `false` | Keep workspace after run (debug only) |
+
+---
+
+## Production deployment
 
 ```bash
-# Backend
-cd pipeline
-go run ./cmd/server
-
-# Frontend (in un altro terminale)
-cd frontend
-npm install
-npm run dev   # http://localhost:5173 con proxy verso :8080
+# Copy to server
+scp docker-compose.yml user@server:~/agent-coordinator/
+ssh user@server "cd ~/agent-coordinator && docker compose up -d"
 ```
 
-## Note
+For public webhook access, put a reverse proxy (nginx, Caddy) or Cloudflare Tunnel in front of port 8080.
 
-- **Flutter** è installato nell'immagine Docker — la build è ~2-3 GB
-- **opencode**: decommenta la riga `npm install -g opencode-ai` nel Dockerfile con il nome npm corretto
-- La configurazione è salvata in un volume Docker persistente (`pipeline_data:/data/config.json`)
-- I workspace temporanei sono in `/workspaces/issue-{N}` e vengono eliminati a fine pipeline
+Remove `KEEP_WORKSPACE=true` and `LOG_LEVEL=debug` from `docker-compose.yml` before deploying.
+
+---
+
+## Project structure
+
+```
+.
+├── cmd/server/          # Go entrypoint
+├── internal/
+│   ├── agent/           # AI CLI runner + prompt builders
+│   ├── api/             # REST API handlers
+│   ├── config/          # Config manager
+│   ├── gitclient/       # Git operations
+│   ├── githubclient/    # GitHub API (issues, PRs, labels)
+│   ├── livelog/         # In-memory live log store
+│   ├── pipeline/        # Multi-agent orchestrator
+│   ├── types/           # Shared types
+│   ├── webhook/         # GitHub webhook handler
+│   └── worker/          # Asynq task processor
+├── frontend/            # React + Vite UI
+├── web/                 # go:embed target for built frontend
+├── Dockerfile
+└── docker-compose.yml
+```

@@ -7,9 +7,12 @@ services:
     environment:
       - REDIS_ADDR=redis:6379
       - CONFIG_PATH=/data/config.json
+      - KEEP_WORKSPACE=true
+      - LOG_LEVEL=debug
     volumes:
-      - pipeline_data:/data        # persiste config.json
-      - workspaces:/workspaces     # workspace temporanei per issue
+      - ./data:/data
+      - ./workspaces:/workspaces
+      - flutter_pub_cache:/root/.pub-cache
     depends_on:
       redis:
         condition: service_healthy
@@ -17,6 +20,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -26,6 +30,5 @@ services:
       - redis_data:/data
 
 volumes:
-  pipeline_data:
-  workspaces:
   redis_data:
+  flutter_pub_cache:

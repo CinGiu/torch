@@ -3,6 +3,7 @@ package worker
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/hibiken/asynq"
 )
@@ -32,6 +33,9 @@ func (d *Dispatcher) Enqueue(task IssueTask) error {
 	if err != nil {
 		return fmt.Errorf("marshal task: %w", err)
 	}
-	_, err = d.client.Enqueue(asynq.NewTask(TaskTypeIssue, payload))
+	_, err = d.client.Enqueue(
+		asynq.NewTask(TaskTypeIssue, payload),
+		asynq.Retention(2*time.Hour),
+	)
 	return err
 }

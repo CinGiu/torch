@@ -56,11 +56,15 @@ func (s *StatusManager) EnsureLabelsExist(ctx context.Context) error {
 		if existingMap[string(label)] {
 			continue
 		}
-		_, _, err := s.gh.Issues.CreateLabel(ctx, s.owner, s.repo, &github.Label{
+		_, resp, err := s.gh.Issues.CreateLabel(ctx, s.owner, s.repo, &github.Label{
 			Name:  github.String(string(label)),
 			Color: github.String(color),
 		})
 		if err != nil {
+			if resp != nil && resp.StatusCode == 403 {
+				slog.Warn("cannot create labels — token needs Issues:write permission on this repo (labels will be skipped)")
+				return nil // no point retrying all labels
+			}
 			slog.Warn("cannot create label", "label", label, "err", err)
 		}
 	}
@@ -69,7 +73,7 @@ func (s *StatusManager) EnsureLabelsExist(ctx context.Context) error {
 
 func (s *StatusManager) Transition(ctx context.Context, issueNumber int, to PipelineLabel, comment string) {
 	// Remove existing pipeline labels
-	current, _, err := s.gh.Issues.ListIssueLabels(ctx, s.owner, s.repo, issueNumber, nil)
+	current, _, err := s.gh.Issues.ListLabelsByIssue(ctx, s.owner, s.repo, issueNumber, nil)
 	if err == nil {
 		for _, l := range current {
 			if strings.HasPrefix(l.GetName(), "ai:") {

@@ -1,23 +1,13 @@
 package pipeline
 
-type AgentStatus string
+import "ai-pipeline/internal/types"
+
+// Re-export types from common package for backward compatibility
+type AgentStatus = types.AgentStatus
+type AgentResult = types.AgentResult
+type IssueContext = types.IssueContext
 
 const (
-	StatusSuccess AgentStatus = "success"
-	StatusFailed  AgentStatus = "failed"
+	StatusSuccess = types.StatusSuccess
+	StatusFailed  = types.StatusFailed
 )
-
-type AgentResult struct {
-	Status   AgentStatus
-	Feedback string
-	Output   string
-}
-
-type IssueContext struct {
-	IssueNumber  int
-	IssueTitle   string
-	IssueBody    string
-	RepoFullName string
-	Workspace    string
-	BranchName   string
-}
