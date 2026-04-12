@@ -344,7 +344,7 @@ function SetupWizard({ config, setConfig, onLaunch, launching }) {
             <div style={{ width: 9, height: 9, borderRadius: "50%", background: colors.orange, boxShadow: `0 0 8px ${colors.orange}` }} />
             <span style={{ fontSize: 13, letterSpacing: "0.2em", color: colors.orange, textTransform: "uppercase", fontFamily: mono }}>setup</span>
           </div>
-          <h1 style={{ margin: 0, fontSize: 32, fontWeight: 800, color: colors.white, letterSpacing: "-0.02em" }}>AI Dev Pipeline</h1>
+          <h1 style={{ margin: 0, fontSize: 32, fontWeight: 800, color: colors.white, letterSpacing: "-0.02em" }}>Torch</h1>
           <p style={{ margin: "8px 0 0", fontSize: 15, color: colors.muted, fontFamily: mono }}>Configure your agents and connect GitHub to get started.</p>
         </div>
 
@@ -977,7 +977,7 @@ function Dashboard({ config, setConfig, onStop, status }) {
               <div style={{ width: 9, height: 9, borderRadius: "50%", background: colors.green, boxShadow: `0 0 10px ${colors.green}`, animation: "pulse 2s infinite" }} />
               <span style={{ fontSize: 13, letterSpacing: "0.2em", color: colors.green, textTransform: "uppercase", fontFamily: mono }}>live</span>
             </div>
-            <h1 style={{ margin: 0, fontSize: 32, fontWeight: 800, color: colors.white, letterSpacing: "-0.02em" }}>AI Dev Pipeline</h1>
+            <h1 style={{ margin: 0, fontSize: 32, fontWeight: 800, color: colors.white, letterSpacing: "-0.02em" }}>Torch</h1>
           </div>
           <Btn variant="danger" onClick={onStop}>■ Stop Pipeline</Btn>
         </div>
