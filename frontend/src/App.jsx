@@ -76,9 +76,9 @@ const DEFAULT_ARGS = {
 };
 
 const AGENT_META = {
-  developer: { icon: "⌨", label: "Developer", color: "#00d4ff", desc: "Implements the feature from the issue" },
-  tester:    { icon: "⬡", label: "Tester",    color: "#00ff9d", desc: "Runs tests and checks coverage" },
-  reviewer:  { icon: "◈", label: "Reviewer",  color: "#ff6b35", desc: "Reviews code quality and architecture" },
+  developer: { icon: "⌨", label: "Developer", color: "#f59e0b", desc: "Implements the feature from the issue" },
+  tester:    { icon: "⬡", label: "Tester",    color: "#6ee7b7", desc: "Runs tests and checks coverage" },
+  reviewer:  { icon: "◈", label: "Reviewer",  color: "#f97316", desc: "Reviews code quality and architecture" },
 };
 
 const defaultAgent = (role) => ({
@@ -110,13 +110,13 @@ const api = {
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
 const mono = "'JetBrains Mono', monospace";
-const sans = "'Syne', sans-serif";
+const sans = "'Inter', sans-serif";
 
 const colors = {
-  bg: "#070710", surface: "#0d0d1a", input: "#0a0a0f",
-  border: "#1a1a2e", borderHover: "#ffffff33",
-  text: "#c9d1d9", muted: "#555", dim: "#333",
-  cyan: "#00d4ff", green: "#00ff9d", orange: "#ff6b35", red: "#ff4444",
+  bg: "#12100e", surface: "#1c1814", input: "#0f0d0b",
+  border: "#2e2720", borderHover: "#ffffff28",
+  text: "#f0ebe4", muted: "#7a6a5e", dim: "#4a3f38",
+  cyan: "#f59e0b", green: "#6ee7b7", orange: "#f97316", red: "#f87171",
   white: "#fff",
 };
 
@@ -140,7 +140,7 @@ function Field({ label, value, onChange, type = "text", placeholder, isCode = fa
         ? <textarea value={value} onChange={e => onChange(e.target.value)} rows={rows} placeholder={placeholder} style={base} onFocus={onFocus} onBlur={onBlur} disabled={disabled} />
         : <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={base} onFocus={onFocus} onBlur={onBlur} disabled={disabled} />
       }
-      {hint && <p style={{ margin: "5px 0 0", fontSize: 12, color: "#444", fontFamily: mono }}>{hint}</p>}
+      {hint && <p style={{ margin: "5px 0 0", fontSize: 12, color: colors.dim, fontFamily: mono }}>{hint}</p>}
     </div>
   );
 }
@@ -250,7 +250,7 @@ function AgentCard({ role, config, onChange }) {
           ? <textarea value={config.system_prompt || ""} onChange={e => set("system_prompt", e.target.value)} rows={10}
               style={{ width: "100%", background: colors.input, border: `1px solid ${colors.border}`, borderRadius: 6, padding: "10px 14px", color: colors.text, fontSize: 13, fontFamily: mono, outline: "none", boxSizing: "border-box", resize: "vertical" }}
               onFocus={e => (e.target.style.borderColor = colors.borderHover)} onBlur={e => (e.target.style.borderColor = colors.border)} />
-          : <div onClick={() => setPromptOpen(true)} style={{ background: colors.input, border: `1px solid ${colors.border}`, borderRadius: 6, padding: "10px 14px", color: "#444", fontSize: 13, fontFamily: mono, cursor: "pointer", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+          : <div onClick={() => setPromptOpen(true)} style={{ background: colors.input, border: `1px solid ${colors.border}`, borderRadius: 6, padding: "10px 14px", color: colors.dim, fontSize: 13, fontFamily: mono, cursor: "pointer", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
               {(config.system_prompt || "").split("\n")[0]}…
             </div>
         }
@@ -387,7 +387,7 @@ function SetupWizard({ config, setConfig, onLaunch, launching }) {
                       <div>
                         <span style={{ fontSize: 13, color: colors.text, fontFamily: mono }}>{scope}</span>
                         <span style={{ fontSize: 12, color: colors.muted, fontFamily: mono }}> · {level}</span>
-                        <div style={{ fontSize: 12, color: "#444", fontFamily: mono }}>{note}</div>
+                        <div style={{ fontSize: 12, color: colors.dim, fontFamily: mono }}>{note}</div>
                       </div>
                     </div>
                   ))}
@@ -447,7 +447,7 @@ function SetupWizard({ config, setConfig, onLaunch, launching }) {
                 ].map(([stack, test, lint]) => (
                   <div key={stack} style={{ display: "flex", gap: 12, marginBottom: 4, alignItems: "center" }}>
                     <span style={{ width: 60, fontSize: 12, color: colors.muted, fontFamily: mono }}>{stack}</span>
-                    <span style={{ fontSize: 12, color: "#444", fontFamily: mono }}>{test} · {lint}</span>
+                    <span style={{ fontSize: 12, color: colors.dim, fontFamily: mono }}>{test} · {lint}</span>
                   </div>
                 ))}
               </div>
@@ -707,12 +707,12 @@ function ExtraEnvEditor({ value, onChange }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <div>
           <label style={{ fontSize: 12, letterSpacing: "0.1em", color: colors.muted, textTransform: "uppercase", fontFamily: mono }}>Agent Environment</label>
-          <p style={{ margin: "3px 0 0", fontSize: 11, color: "#444", fontFamily: mono }}>Injected into every agent process. For PATH, the value is prepended to the existing PATH.</p>
+          <p style={{ margin: "3px 0 0", fontSize: 11, color: colors.dim, fontFamily: mono }}>Injected into every agent process. For PATH, the value is prepended to the existing PATH.</p>
         </div>
         <button onClick={add} style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 4, color: colors.muted, cursor: "pointer", padding: "3px 10px", fontSize: 12, fontFamily: mono, flexShrink: 0 }}>+ add</button>
       </div>
       {entries.length === 0 && (
-        <p style={{ fontSize: 12, color: "#333", fontFamily: mono, margin: 0 }}>e.g. <span style={{ color: colors.cyan }}>PATH</span> → <span style={{ color: colors.text }}>/opt/flutter/bin:/opt/android-sdk/cmdline-tools/latest/bin</span></p>
+        <p style={{ fontSize: 12, color: colors.dim, fontFamily: mono, margin: 0 }}>e.g. <span style={{ color: colors.cyan }}>PATH</span> → <span style={{ color: colors.text }}>/opt/flutter/bin:/opt/android-sdk/cmdline-tools/latest/bin</span></p>
       )}
       {entries.map(([k, v]) => (
         <div key={k} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
@@ -787,13 +787,13 @@ function LiveLogPanel({ runs }) {
             {issue ? `live · issue #${issue}` : "live log"}
           </span>
         </div>
-        <span style={{ fontFamily: mono, fontSize: 11, color: "#333" }}>{lines.length} lines</span>
+        <span style={{ fontFamily: mono, fontSize: 11, color: colors.dim }}>{lines.length} lines</span>
       </div>
 
       {/* Issue selector — only in-progress runs */}
       <div style={{ padding: "8px 16px", borderBottom: `1px solid ${colors.border}` }}>
         {liveRuns.length === 0 ? (
-          <span style={{ fontFamily: mono, fontSize: 12, color: "#333" }}>no active runs</span>
+          <span style={{ fontFamily: mono, fontSize: 12, color: colors.dim }}>no active runs</span>
         ) : (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {liveRuns.map(r => (
@@ -821,7 +821,7 @@ function LiveLogPanel({ runs }) {
         style={{ height: 360, overflowY: "auto", padding: "10px 0", fontFamily: mono, fontSize: 12 }}
       >
         {lines.length === 0 && (
-          <p style={{ color: "#333", textAlign: "center", padding: "40px 0", margin: 0 }}>waiting for agent output…</p>
+          <p style={{ color: colors.dim, textAlign: "center", padding: "40px 0", margin: 0 }}>waiting for agent output…</p>
         )}
         {lines.filter(l => l.content?.trim()).map((l, i) => {
           const col  = LOG_COLORS[l.type] ?? colors.muted;
@@ -829,7 +829,7 @@ function LiveLogPanel({ runs }) {
           const time = new Date(l.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
           return (
             <div key={i} style={{ display: "flex", gap: 10, padding: "2px 16px", alignItems: "flex-start", borderBottom: l.type === "text" ? `1px solid ${colors.border}22` : "none" }}>
-              <span style={{ color: "#333", minWidth: 60, flexShrink: 0 }}>{time}</span>
+              <span style={{ color: colors.dim, minWidth: 60, flexShrink: 0 }}>{time}</span>
               <span style={{ color: colors.muted, minWidth: 70, flexShrink: 0, fontSize: 11 }}>{l.role}</span>
               <span style={{ color: col, minWidth: 14, flexShrink: 0 }}>{icon}</span>
               <span style={{ color: col, whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.6, flex: 1 }}>{l.content}</span>
@@ -893,9 +893,9 @@ function RunsList({ runs }) {
                   </span>
                 </div>
                 <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                  <span style={{ fontSize: 12, color: "#444", fontFamily: mono }}>{run.repo}</span>
+                  <span style={{ fontSize: 12, color: colors.dim, fontFamily: mono }}>{run.repo}</span>
                   {ts && (
-                    <span style={{ fontSize: 12, color: "#333", fontFamily: mono }}>
+                    <span style={{ fontSize: 12, color: colors.dim, fontFamily: mono }}>
                       {new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     </span>
                   )}
@@ -931,7 +931,7 @@ function RunsList({ runs }) {
               <div style={{
                 marginTop: 12, padding: "12px 14px",
                 background: `${colors.red}0a`, border: `1px solid ${colors.red}33`,
-                borderRadius: 6, fontFamily: mono, fontSize: 12, color: "#cc6666",
+                borderRadius: 6, fontFamily: mono, fontSize: 12, color: colors.red,
                 whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.7,
               }}>
                 {run.error}
@@ -1021,7 +1021,7 @@ function Dashboard({ config, setConfig, onStop, status }) {
                     {i < 2 && (
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
                         <span style={{ color: colors.dim, fontSize: 15 }}>→</span>
-                        <span style={{ fontSize: 11, color: "#2a2a3a", fontFamily: mono }}>fix loop ↩</span>
+                        <span style={{ fontSize: 11, color: colors.dim, fontFamily: mono }}>fix loop ↩</span>
                       </div>
                     )}
                   </div>
@@ -1097,8 +1097,8 @@ function Dashboard({ config, setConfig, onStop, status }) {
           </div>
         )}
 
-        <p style={{ margin: 0, fontSize: 12, color: "#2a2a3a", fontFamily: mono, textAlign: "center" }}>
-          refreshing every 5s · webhook active on <span style={{ color: "#444" }}>/webhook/github</span>
+        <p style={{ margin: 0, fontSize: 12, color: colors.dim, fontFamily: mono, textAlign: "center" }}>
+          refreshing every 5s · webhook active on <span style={{ color: colors.dim }}>/webhook/github</span>
         </p>
       </div>
 
