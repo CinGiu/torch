@@ -227,7 +227,21 @@ function AgentCard({ role, config, onChange }) {
         <Toggle value={config.cli} onChange={handleCliChange} />
       </div>
       {config.cli === "claude" && (
-        <Field label="OAuth Token" value={config.api_key || ""} onChange={v => set("api_key", v)} type="password" placeholder="oc-ant-..." hint="Generate with: claude setup-token" isCode />
+        <>
+          <Field label="OAuth Token" value={config.api_key || ""} onChange={v => set("api_key", v)} type="password" placeholder="oc-ant-..." isCode />
+          <div style={{ padding: "10px 14px", background: colors.input, border: `1px solid ${colors.border}`, borderRadius: 6, marginBottom: 16 }}>
+            <p style={{ margin: "0 0 6px", fontSize: 12, color: colors.muted, fontFamily: mono, letterSpacing: "0.08em", textTransform: "uppercase" }}>How to generate</p>
+            <p style={{ margin: 0, fontSize: 13, color: colors.text, fontFamily: mono, lineHeight: 1.8 }}>
+              1. Install Claude Code CLI on your machine<br />
+              2. Run <span style={{ color: colors.cyan }}>claude setup-token</span> in your terminal<br />
+              3. A browser window opens — log in with your Anthropic account<br />
+              4. Copy the token (starts with <span style={{ color: colors.cyan }}>oc-ant-</span>) and paste it above
+            </p>
+            <p style={{ margin: "8px 0 0", fontSize: 12, color: colors.muted, fontFamily: mono }}>
+              Requires a Claude Pro or Max subscription. Usage is included in your plan — no extra per-token charges.
+            </p>
+          </div>
+        </>
       )}
       {config.cli === "opencode" && (
         <div style={{ padding: "10px 14px", background: colors.input, border: `1px solid ${colors.border}`, borderRadius: 6, marginBottom: 16 }}>
