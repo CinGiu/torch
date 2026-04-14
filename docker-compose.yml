@@ -9,8 +9,8 @@ services:
       - CONFIG_PATH=/data/config.json
       - KEEP_WORKSPACE=true
       - LOG_LEVEL=debug
-      - ADMIN_EMAIL=giulio.cinelli@cubbit.io   # your Cubbit email — unlocks the Admin tab
-      - ALLOWED_DOMAIN=cubbit.io               # restrict login to this domain; leave empty to allow any Cubbit account
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ALLOWED_DOMAIN=${ALLOWED_DOMAIN}
     volumes:
       - ./data:/data
       - ./workspaces:/workspaces
