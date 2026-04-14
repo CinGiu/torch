@@ -1,3 +1,5 @@
-torch.tuodominio.com {
+# Torch is exposed on host port 9094 (HTTP only).
+# Put Cloudflare or an existing nginx in front for HTTPS + SSL termination.
+:80 {
     reverse_proxy torch:8080
 }
