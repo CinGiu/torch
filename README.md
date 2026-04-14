@@ -111,9 +111,15 @@ Each agent is an independent AI CLI process (`claude` or `opencode`) running in 
 ### 1. Clone and start
 
 ```bash
+# Install Git LFS (once per machine)
+# Debian/Ubuntu:  apt-get install git-lfs
+# RHEL/Fedora:    dnf install git-lfs
+# macOS:          brew install git-lfs
+git lfs install
+
 git clone git@github.com:CinGiu/torch.git
 cd torch
-docker compose up --build
+docker compose up --build -d
 ```
 
 The first build downloads Flutter and the AI CLIs — expect a few minutes.
