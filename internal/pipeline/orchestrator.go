@@ -12,16 +12,16 @@ import (
 )
 
 type Orchestrator struct {
-	cfgMgr *config.Manager
+	cfg    config.Config
 	status *githubclient.StatusManager
 }
 
-func NewOrchestrator(cfgMgr *config.Manager, status *githubclient.StatusManager) *Orchestrator {
-	return &Orchestrator{cfgMgr: cfgMgr, status: status}
+func NewOrchestrator(cfg config.Config, status *githubclient.StatusManager) *Orchestrator {
+	return &Orchestrator{cfg: cfg, status: status}
 }
 
 func (o *Orchestrator) Run(ctx context.Context, issueCtx IssueContext) error {
-	cfg := o.cfgMgr.Get()
+	cfg := o.cfg
 	log := slog.With("issue", issueCtx.IssueNumber)
 
 	sm := func(to githubclient.PipelineLabel, comment string) {

@@ -30,6 +30,30 @@ type IssueItem struct {
 	URL    string   `json:"url"`
 }
 
+// ListUserRepos returns the full names ("owner/repo") of all repos the token
+// has access to, sorted by most recently updated (up to 300 repos).
+func (c *Client) ListUserRepos(ctx context.Context) ([]string, error) {
+	opts := &github.RepositoryListByAuthenticatedUserOptions{
+		Sort:        "updated",
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+	var names []string
+	for {
+		repos, resp, err := c.gh.Repositories.ListByAuthenticatedUser(ctx, opts)
+		if err != nil {
+			return nil, fmt.Errorf("list repos: %w", err)
+		}
+		for _, r := range repos {
+			names = append(names, r.GetFullName())
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return names, nil
+}
+
 func (c *Client) ListIssues(ctx context.Context, fullName string) ([]IssueItem, error) {
 	owner, repo, err := splitRepo(fullName)
 	if err != nil {

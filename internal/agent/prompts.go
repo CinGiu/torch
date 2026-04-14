@@ -42,3 +42,4 @@ func BuildReviewerPrompt(systemPrompt string, ctx types.IssueContext, lintCmd, t
 	task := fmt.Sprintf("---\nIssue #%d: %s\n\nReview the implementation of this issue.", ctx.IssueNumber, ctx.IssueTitle)
 	return strings.TrimSpace(applyCommands(systemPrompt, lintCmd, testCmd) + "\n\n" + task)
 }
+

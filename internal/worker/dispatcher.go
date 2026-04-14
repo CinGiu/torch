@@ -11,6 +11,7 @@ import (
 const TaskTypeIssue = "issue:process"
 
 type IssueTask struct {
+	AccountID    string `json:"account_id"`
 	IssueNumber  int    `json:"issue_number"`
 	IssueTitle   string `json:"issue_title"`
 	IssueBody    string `json:"issue_body"`
@@ -39,3 +40,4 @@ func (d *Dispatcher) Enqueue(task IssueTask) error {
 	)
 	return err
 }
+

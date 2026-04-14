@@ -9,20 +9,21 @@ import (
 	"path/filepath"
 	"strings"
 
-	"torch/internal/config"
 	"torch/internal/gitclient"
 	"torch/internal/githubclient"
 	"torch/internal/pipeline"
+	"torch/internal/store"
 
 	"github.com/hibiken/asynq"
 )
 
 type Processor struct {
-	cfgMgr *config.Manager
+	store         *store.Store
+	workspacesDir string
 }
 
-func NewProcessor(cfgMgr *config.Manager) *Processor {
-	return &Processor{cfgMgr: cfgMgr}
+func NewProcessor(st *store.Store, workspacesDir string) *Processor {
+	return &Processor{store: st, workspacesDir: workspacesDir}
 }
 
 func (p *Processor) ProcessIssueTask(ctx context.Context, t *asynq.Task) error {
@@ -31,11 +32,16 @@ func (p *Processor) ProcessIssueTask(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 
-	cfg := p.cfgMgr.Get()
-	log := slog.With("issue", task.IssueNumber, "repo", task.RepoFullName)
+	cfg, err := p.store.GetConfig(task.AccountID)
+	if err != nil {
+		return fmt.Errorf("get config for account %s: %w", task.AccountID, err)
+	}
+
+	log := slog.With("account", task.AccountID[:8], "issue", task.IssueNumber, "repo", task.RepoFullName)
 	log.Info("pipeline started")
 
-	workspace := fmt.Sprintf("%s/issue-%d", cfg.Pipeline.WorkspacesDir, task.IssueNumber)
+	// Include first 8 chars of account_id to avoid collisions across users
+	workspace := fmt.Sprintf("%s/issue-%s-%d", p.workspacesDir, task.AccountID[:8], task.IssueNumber)
 	branchName := fmt.Sprintf("feat/issue-%d-ai", task.IssueNumber)
 
 	gitClient := gitclient.NewClient(cfg.Github.Token)
@@ -58,12 +64,10 @@ func (p *Processor) ProcessIssueTask(ctx context.Context, t *asynq.Task) error {
 		}
 	}()
 
-	// Ensure pipeline labels exist on the repo
 	if err := sm.EnsureLabelsExist(ctx); err != nil {
 		log.Warn("cannot ensure labels", "err", err)
 	}
 
-	// Clone
 	log.Info("cloning")
 	if err := gitClient.Clone(task.CloneURL, workspace); err != nil {
 		sm.Transition(ctx, task.IssueNumber, githubclient.LabelFailed,
@@ -71,18 +75,15 @@ func (p *Processor) ProcessIssueTask(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("clone: %w", err)
 	}
 
-	// Branch
 	if err := gitClient.CreateBranch(workspace, branchName); err != nil {
 		return fmt.Errorf("branch: %w", err)
 	}
 
-	// Inject workspace config files (opencode permissions, etc.)
 	if err := setupWorkspace(workspace, cfg.Pipeline.OpencodeConfig); err != nil {
 		log.Warn("workspace setup failed", "err", err)
 	}
 
-	// Run multi-agent pipeline
-	orch := pipeline.NewOrchestrator(p.cfgMgr, sm)
+	orch := pipeline.NewOrchestrator(cfg, sm)
 	issueCtx := pipeline.IssueContext{
 		IssueNumber:  task.IssueNumber,
 		IssueTitle:   task.IssueTitle,
@@ -96,7 +97,6 @@ func (p *Processor) ProcessIssueTask(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("orchestrator: %w", err)
 	}
 
-	// Commit + push
 	commitMsg := fmt.Sprintf("feat: implement issue #%d\n\n%s", task.IssueNumber, task.IssueTitle)
 	if err := gitClient.CommitAndPush(workspace, branchName, commitMsg); err != nil {
 		sm.Transition(ctx, task.IssueNumber, githubclient.LabelFailed,
@@ -104,7 +104,6 @@ func (p *Processor) ProcessIssueTask(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("push: %w", err)
 	}
 
-	// Open PR
 	prURL, err := ghClient.OpenPR(ctx, githubclient.PRRequest{
 		RepoFullName: task.RepoFullName,
 		Title:        fmt.Sprintf("[AI] %s", task.IssueTitle),
@@ -132,11 +131,7 @@ func splitRepo(fullName string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
-// setupWorkspace injects tool config files into the workspace before agents run.
-// Files are excluded from git tracking via .git/info/exclude so they are never committed.
 func setupWorkspace(workspace string, opencodeCfgTemplate string) error {
-	// Build opencode.json: start from user-provided template or empty object,
-	// then ensure permission.* = allow is set.
 	opencodeCfg, err := mergeOpencodePermission(opencodeCfgTemplate)
 	if err != nil {
 		return fmt.Errorf("merge opencode config: %w", err)
@@ -145,22 +140,16 @@ func setupWorkspace(workspace string, opencodeCfgTemplate string) error {
 		return fmt.Errorf("write opencode.json: %w", err)
 	}
 
-	// Exclude injected files from git without touching the repo's .gitignore
 	excludePath := filepath.Join(workspace, ".git", "info", "exclude")
 	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open .git/info/exclude: %w", err)
 	}
 	defer f.Close()
-
-	_, err = f.WriteString("\n# injected by torch\nopencode.json\n")
+	_, err = f.WriteString("\n# injected by torch\nopencode.json\n.torch_handoff.md\n")
 	return err
 }
 
-// mergeOpencodePermission takes the user's opencode.json template (may be empty)
-// and ensures permission["*"] = "allow" is set, returning the merged JSON.
-// Any values containing {file:...} references are stripped — those files do not
-// exist in the workspace and would cause opencode to fail on startup.
 func mergeOpencodePermission(template string) (string, error) {
 	base := map[string]interface{}{}
 	if template != "" {
@@ -168,18 +157,13 @@ func mergeOpencodePermission(template string) (string, error) {
 			return "", fmt.Errorf("invalid opencode_config JSON: %w", err)
 		}
 	}
-
-	// Strip {file:...} references recursively
 	stripFileRefs(base)
-
-	// Ensure permission map exists and has * = allow
 	perm, _ := base["permission"].(map[string]interface{})
 	if perm == nil {
 		perm = map[string]interface{}{}
 	}
 	perm["*"] = "allow"
 	base["permission"] = perm
-
 	out, err := json.MarshalIndent(base, "", "  ")
 	if err != nil {
 		return "", err
@@ -187,7 +171,6 @@ func mergeOpencodePermission(template string) (string, error) {
 	return string(out), nil
 }
 
-// stripFileRefs removes any map keys whose string value contains a {file:...} pattern.
 func stripFileRefs(m map[string]interface{}) {
 	for k, v := range m {
 		switch val := v.(type) {

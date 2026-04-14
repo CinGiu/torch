@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -14,8 +17,11 @@ import (
 
 	"torch/internal/api"
 	"torch/internal/config"
+	"torch/internal/proxy"
+	"torch/internal/store"
 	"torch/internal/webhook"
 	"torch/internal/worker"
+	"torch/internal/ws"
 	"torch/web"
 
 	"github.com/hibiken/asynq"
@@ -28,28 +34,41 @@ func main() {
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
 
-	redisAddr := getEnv("REDIS_ADDR", "redis:6379")
-	configPath := getEnv("CONFIG_PATH", "/data/config.json")
-	concurrency := getEnvInt("CONCURRENCY", 4)
+	redisAddr      := getEnv("REDIS_ADDR", "redis:6379")
+	dbPath         := getEnv("DB_PATH", "/data/torch.db")
+	workspacesDir  := getEnv("WORKSPACES_DIR", "/workspaces")
+	concurrency    := getEnvInt("CONCURRENCY", 4)
 
-	// ── Config ────────────────────────────────────
-	cfgMgr, err := config.NewManager(configPath)
+	// ── Store (SQLite, per-user configs) ──────────
+	st, err := store.New(dbPath)
 	if err != nil {
-		slog.Error("cannot load config", "err", err)
+		slog.Error("cannot open store", "err", err)
 		os.Exit(1)
 	}
-	slog.Info("config loaded", "path", configPath)
+	slog.Info("store ready", "path", dbPath)
 
-	// ── Check CLIs ────────────────────────────────
-	checkCLIs(cfgMgr.Get())
+	// ── Check CLIs from any stored config ─────────
+	checkCLIsFromStore(st)
 
-	// ── Standard lib router ────────────────────────────────
+	// ── Router ────────────────────────────────────
 	mux := http.NewServeMux()
 
 	dispatcher := worker.NewDispatcher(redisAddr)
+	apiHandler := api.NewHandler(st, redisAddr, dispatcher)
 
-	// API routes
-	apiHandler := api.NewHandler(cfgMgr, redisAddr, dispatcher)
+	// Session exchange — no prior auth required
+	mux.HandleFunc("/api/session", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			apiHandler.ExchangeSession(w, r)
+		case http.MethodDelete:
+			apiHandler.DeleteSession(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	// API routes (protected by authMiddleware)
 	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -81,6 +100,13 @@ func main() {
 		}
 		apiHandler.StopPipeline(w, r)
 	})
+	mux.HandleFunc("/api/repos", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		apiHandler.ListUserRepos(w, r)
+	})
 	mux.HandleFunc("/api/issues", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -103,18 +129,14 @@ func main() {
 		apiHandler.GetLiveLog(w, r)
 	})
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// Webhook
-	webhookHandler := webhook.NewHandler(cfgMgr, dispatcher)
-	mux.HandleFunc("/webhook/github", func(w http.ResponseWriter, r *http.Request) {
+	// Webhook — no auth, uses per-user HMAC secret; account_id in path
+	webhookHandler := webhook.NewHandler(st, dispatcher)
+	mux.HandleFunc("/webhook/github/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -122,14 +144,22 @@ func main() {
 		webhookHandler.Handle(w, r)
 	})
 
+	// WebSocket terminal — auth handled inside the handler via ?token= param
+	mux.HandleFunc("/ws/terminal", ws.TerminalHandler(st.GetAccountBySession, st))
+
+	// Cubbit reverse proxy (no auth — needed for the login flow itself)
+	cubbitProxy := proxy.CubbitHandler()
+	mux.Handle("/cubbit-proxy/iam/", cubbitProxy)
+	mux.Handle("/cubbit-proxy/composer-hub/", cubbitProxy)
+	mux.Handle("/cubbit-proxy/keyvault/", cubbitProxy)
+	mux.HandleFunc("/cubbit-proxy/console-proxy/tenant-id", proxy.ConsoleTenantHandler)
+
 	// Frontend — serve embedded dist/
 	distFS, err := fs.Sub(web.FS, "dist")
 	if err != nil {
 		slog.Error("cannot open embedded frontend", "err", err)
 		os.Exit(1)
 	}
-
-	// SPA: serve static assets directly, fall back to index.html for unknown paths
 	fileServer := http.FileServer(http.FS(distFS))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/")
@@ -144,7 +174,6 @@ func main() {
 				return
 			}
 		}
-		// Unknown path → SPA index.html
 		index, err := distFS.Open("index.html")
 		if err != nil {
 			http.NotFound(w, r)
@@ -155,9 +184,8 @@ func main() {
 		io.Copy(w, index)
 	})
 
-	// ── Asynq worker (same process) ───────────────
-	processor := worker.NewProcessor(cfgMgr)
-
+	// ── Asynq worker ──────────────────────────────
+	processor := worker.NewProcessor(st, workspacesDir)
 	srv := asynq.NewServer(
 		asynq.RedisClientOpt{Addr: redisAddr},
 		asynq.Config{Concurrency: concurrency},
@@ -175,10 +203,40 @@ func main() {
 
 	// ── HTTP server ───────────────────────────────
 	slog.Info("server listening", "addr", ":8080")
-	if err := http.ListenAndServe(":8080", loggingMiddleware(mux)); err != nil {
+	if err := http.ListenAndServe(":8080", loggingMiddleware(authMiddleware(st, mux))); err != nil {
 		slog.Error("server crashed", "err", err)
 		os.Exit(1)
 	}
+}
+
+// authMiddleware looks up the local session token (Bearer header) in the SQLite
+// sessions table and injects account_id into the request context.
+// /api/session itself is exempt (it's how sessions are created/deleted).
+func authMiddleware(st *store.Store, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/session" {
+			authHeader := r.Header.Get("Authorization")
+			if !strings.HasPrefix(authHeader, "Bearer ") {
+				writeUnauthorized(w)
+				return
+			}
+			token := strings.TrimPrefix(authHeader, "Bearer ")
+			accountID, err := st.GetAccountBySession(token)
+			if err != nil {
+				writeUnauthorized(w)
+				return
+			}
+			ctx := context.WithValue(r.Context(), api.ContextAccountID, accountID)
+			r = r.WithContext(ctx)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func writeUnauthorized(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	w.Write([]byte(`{"error":"unauthorized"}`))
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {
@@ -201,6 +259,29 @@ type recordingResponseWriter struct {
 func (w *recordingResponseWriter) WriteHeader(code int) {
 	w.statusCode = code
 	w.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack forwards the hijack call to the underlying ResponseWriter so that
+// WebSocket upgrades (which need to take over the raw TCP connection) work
+// even when the response is wrapped by loggingMiddleware.
+func (w *recordingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return h.Hijack()
+}
+
+func checkCLIsFromStore(st *store.Store) {
+	configs, err := st.GetAllConfigs()
+	if err != nil {
+		return
+	}
+	seen := map[string]bool{}
+	for _, cfg := range configs {
+		checkCLIs(cfg)
+		_ = seen
+	}
 }
 
 func checkCLIs(cfg config.Config) {

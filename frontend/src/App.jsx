@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
+import { loadAuthWithoutExpiry, saveAuth, clearAuth } from "./session.js";
+import "@xterm/xterm/css/xterm.css";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -6,39 +8,55 @@ const DEFAULT_PROMPTS = {
   developer: `You are an expert developer working on a production codebase.
 
 Your task:
-1. Explore the codebase — understand existing patterns, architecture, naming conventions
-2. Implement the feature described in the issue
-3. Write appropriate unit tests
-4. Run '{lint_command}' — fix ALL warnings and errors
-5. Run '{test_command}' — all tests must pass
-6. Stage all changes with 'git add .'
+1. Read .torch_handoff.md if it exists — it contains feedback from a previous fix round.
+2. Explore the codebase — understand existing patterns, architecture, naming conventions.
+3. Implement the feature described in the issue. Match existing code style exactly. Minimal, focused changes — do not over-engineer.
+4. Do NOT write tests. The tester agent handles that.
+5. Run '{lint_command}' — fix ALL warnings and errors before continuing.
+6. Run '{test_command}' — all pre-existing tests must still pass. Fix any regressions you introduced. Do not delete tests to make them pass.
+7. Stage only implementation files with 'git add .' (do not stage test files you did not touch).
+8. Write .torch_handoff.md (it will not be committed) with the following sections:
+
+## What was implemented
+Describe the feature: what it does, the approach taken, key decisions made.
+
+## Files changed
+List every file added or modified, with a one-line note on what changed.
+
+## Notes for the tester
+Point out the most important behaviours to test, edge cases to consider, and any tricky logic paths.
 
 Rules:
-- Match existing code style exactly
-- Minimal, focused changes — do not over-engineer
-- Do not modify dependency files unless strictly necessary
-- Never break existing tests
-- Do NOT commit — only stage changes`,
+- Do NOT commit — only stage changes.
+- Do not modify dependency files unless strictly necessary.
+- Do not modify or delete existing tests.`,
 
   tester: `You are a senior QA engineer. Your job is to WRITE tests, not just run them.
 
 Steps:
-1. Read the issue description and understand expected behavior
-2. Run 'git diff --staged' to see exactly what the developer implemented
-3. Identify all new functions, classes, and logic paths that lack test coverage
-4. Write unit tests (and integration tests where appropriate) that cover:
-   - The happy path for every new feature
-   - Edge cases and boundary conditions
-   - Error/failure scenarios
-5. Follow existing test conventions and file structure in the project
-6. Stage all new/modified test files with 'git add .'
-7. Run '{lint_command}' — fix any issues in the test files you wrote
-8. Run '{test_command}' — all tests must pass before you finish
+1. Read .torch_handoff.md — the developer wrote it for you. Understand what was implemented and what needs testing.
+2. Run 'git diff --staged' to inspect the implementation in detail.
+3. Write unit tests (and integration tests where appropriate) covering:
+   - Every new function, method, or class introduced
+   - The happy path for each new behaviour
+   - Edge cases and boundary conditions called out in .torch_handoff.md
+   - Error and failure scenarios
+4. Follow existing test file structure and naming conventions exactly.
+5. Stage all new/modified test files with 'git add .'.
+6. Run '{lint_command}' — fix any lint issues in the test files you wrote.
+7. Run '{test_command}' — all tests (old and new) must pass.
+8. Update .torch_handoff.md by appending a new section:
+
+## What the tester did
+List the test files created/modified and what each covers.
+
+## Notes for the reviewer
+Highlight any areas where coverage is intentionally limited and why, or anything that deserves extra scrutiny in the review.
 
 Output format (respond with this exact JSON structure):
 {
   "status": "success" | "failed",
-  "feedback": "if failed: what tests are still missing or failing, and why",
+  "feedback": "if failed: which tests are failing or missing, and why",
   "issues": ["specific issue 1", "specific issue 2"]
 }
 
@@ -47,19 +65,25 @@ Return failed if: any test fails, you could not write meaningful tests, or criti
   reviewer: `You are a senior software architect doing a code review.
 
 Steps:
-1. Run 'git diff --staged' to see all changes
-2. Review for: correctness, code quality, architecture, security, performance
-3. Check that implementation matches the issue requirements exactly
-4. Verify naming conventions and code style match the existing codebase
+1. Read .torch_handoff.md — it summarises what the developer implemented and what the tester verified. Use it as context for your review.
+2. Run 'git diff --staged' to see all staged changes (implementation + tests).
+3. Review for:
+   - Correctness: does the implementation fully satisfy the issue requirements?
+   - Code quality: naming, clarity, duplication, dead code
+   - Architecture: does it fit existing patterns? No unnecessary abstractions
+   - Security: input validation, error handling, no sensitive data leaked
+   - Test coverage: are the important paths tested?
+4. Verify naming conventions and code style match the existing codebase.
 
 Output format (respond with this exact JSON structure):
 {
   "status": "success" | "failed",
-  "feedback": "detailed list of required changes (empty if success)",
-  "comments": ["comment 1", "comment 2"]
+  "feedback": "required changes if failed, empty string if success",
+  "comments": ["observation 1", "observation 2"]
 }
 
-Be constructive but strict. Reject if there are architectural issues or missing requirements.`,
+Be constructive but strict. Return failed if there are correctness issues, architectural problems, security concerns, or missing requirements. Minor style nits alone are not grounds for failure.`,
+
 };
 
 const DEFAULT_ARGS = {
@@ -67,7 +91,7 @@ const DEFAULT_ARGS = {
     developer: ["--print", "--dangerously-skip-permissions", "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep", "--max-turns", "40"],
     tester:    ["--print", "--dangerously-skip-permissions", "--allowedTools", "Bash,Read,Glob,Grep", "--max-turns", "20"],
     reviewer:  ["--print", "--dangerously-skip-permissions", "--allowedTools", "Bash,Read,Glob,Grep", "--max-turns", "20"],
-  },
+    },
   opencode: {
     developer: ["run"],
     tester:    ["run"],
@@ -83,8 +107,8 @@ const AGENT_META = {
 
 const defaultAgent = (role) => ({
   cli: "claude", api_key: "", base_url: "", model: "",
-  args: DEFAULT_ARGS.claude[role],
-  system_prompt: DEFAULT_PROMPTS[role],
+  args: DEFAULT_ARGS.claude[role] ?? ["--print", "--dangerously-skip-permissions", "--allowedTools", "Bash,Read,Glob,Grep", "--max-turns", "30"],
+  system_prompt: DEFAULT_PROMPTS[role] ?? "",
   max_fix_rounds: 3,
 });
 
@@ -96,15 +120,36 @@ const emptyConfig = () => ({
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 
+function authHeaders() {
+  try {
+    const stored = localStorage.getItem("torch_auth");
+    if (!stored) return {};
+    const { token } = JSON.parse(stored);
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch { return {}; }
+}
+
+async function apiFetch(url, options = {}) {
+  const headers = { ...authHeaders(), ...(options.headers || {}) };
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) {
+    const err = new Error("unauthorized");
+    err.status = 401;
+    throw err;
+  }
+  return res;
+}
+
 const api = {
-  getConfig:    () => fetch("/api/config").then(r => r.json()),
-  saveConfig:   (cfg) => fetch("/api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) }).then(r => r.json()),
-  getStatus:    () => fetch("/api/status").then(r => r.json()),
-  start:        () => fetch("/api/pipeline/start",  { method: "POST" }).then(r => r.json()),
-  stop:         () => fetch("/api/pipeline/stop",   { method: "POST" }).then(r => r.json()),
-  listIssues:   (repo) => fetch(`/api/issues?repo=${encodeURIComponent(repo)}`).then(r => { if (!r.ok) return r.json().then(e => Promise.reject(e.error)); return r.json(); }),
-  triggerIssue: (body) => fetch("/api/pipeline/trigger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json()),
-  getLiveLog:   (issue) => fetch(`/api/live-log?issue=${issue}`).then(r => r.json()),
+  getConfig:    () => apiFetch("/api/config").then(r => r.json()),
+  saveConfig:   (cfg) => apiFetch("/api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) }).then(r => r.json()),
+  getStatus:    () => apiFetch("/api/status").then(r => r.json()),
+  start:        () => apiFetch("/api/pipeline/start",  { method: "POST" }).then(r => r.json()),
+  stop:         () => apiFetch("/api/pipeline/stop",   { method: "POST" }).then(r => r.json()),
+  listIssues:   (repo) => apiFetch(`/api/issues?repo=${encodeURIComponent(repo)}`).then(r => { if (!r.ok) return r.json().then(e => Promise.reject(e.error)); return r.json(); }),
+  triggerIssue: (body) => apiFetch("/api/pipeline/trigger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json()),
+  getLiveLog:   (issue) => apiFetch(`/api/live-log?issue=${issue}`).then(r => r.json()),
+  listRepos:    () => apiFetch("/api/repos").then(r => r.json()),
 };
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -251,13 +296,6 @@ function AgentCard({ role, config, onChange }) {
           />
         </>
       )}
-      {config.cli === "opencode" && (
-        <div style={{ padding: "10px 14px", background: colors.input, border: `1px solid ${colors.border}`, borderRadius: 6, marginBottom: 16 }}>
-          <p style={{ margin: 0, fontSize: 12, color: colors.muted, fontFamily: mono }}>
-            Provider, model and API key are configured via <span style={{ color: colors.cyan }}>Pipeline → Opencode Config</span> (opencode.json injected into each workspace).
-          </p>
-        </div>
-      )}
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <label style={{ fontSize: 12, letterSpacing: "0.1em", color: colors.muted, textTransform: "uppercase", fontFamily: mono }}>System Prompt</label>
@@ -341,7 +379,7 @@ function StepIndicator({ current, onGoTo }) {
   );
 }
 
-function SetupWizard({ config, setConfig, onLaunch, launching }) {
+function SetupWizard({ config, setConfig, onLaunch, launching, onLogout, auth }) {
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
 
@@ -361,13 +399,19 @@ function SetupWizard({ config, setConfig, onLaunch, launching }) {
       <div style={{ maxWidth: 1020, margin: "0 auto" }}>
 
         {/* Header */}
-        <div style={{ marginBottom: 36 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-            <div style={{ width: 9, height: 9, borderRadius: "50%", background: colors.orange, boxShadow: `0 0 8px ${colors.orange}` }} />
-            <span style={{ fontSize: 13, letterSpacing: "0.2em", color: colors.orange, textTransform: "uppercase", fontFamily: mono }}>setup</span>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 36 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <img src="/logo-48.png" alt="Torch" style={{ width: 48, height: 48, borderRadius: 12 }} />
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: colors.orange, boxShadow: `0 0 8px ${colors.orange}` }} />
+                <span style={{ fontSize: 12, letterSpacing: "0.2em", color: colors.orange, textTransform: "uppercase", fontFamily: mono }}>setup</span>
+              </div>
+              <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, color: colors.white, letterSpacing: "-0.02em" }}>Torch</h1>
+              <p style={{ margin: "4px 0 0", fontSize: 14, color: colors.muted, fontFamily: mono }}>Configure your agents and connect GitHub to get started.</p>
+            </div>
           </div>
-          <h1 style={{ margin: 0, fontSize: 32, fontWeight: 800, color: colors.white, letterSpacing: "-0.02em" }}>Torch</h1>
-          <p style={{ margin: "8px 0 0", fontSize: 15, color: colors.muted, fontFamily: mono }}>Configure your agents and connect GitHub to get started.</p>
+          <Btn variant="ghost" onClick={onLogout}>Logout</Btn>
         </div>
 
         <StepIndicator current={step} onGoTo={setStep} />
@@ -384,6 +428,22 @@ function SetupWizard({ config, setConfig, onLaunch, launching }) {
                 <AgentCard key={role} role={role} config={config.agents[role]} onChange={setAgent(role)} />
               ))}
             </div>
+            {Object.values(config.agents).some(a => a.cli === "opencode") && (
+              <Card style={{ marginBottom: 28 }}>
+                <CardTitle icon="{}">Opencode Config</CardTitle>
+                <p style={{ margin: "-4px 0 16px", fontSize: 13, color: colors.muted, fontFamily: mono }}>
+                  At least one agent uses <span style={{ color: colors.cyan }}>opencode</span>. Paste your <span style={{ color: colors.cyan }}>opencode.json</span> here — it will be injected into every workspace before agents run. <span style={{ color: colors.dim }}>permission.* = allow is added automatically.</span>
+                </p>
+                <Field
+                  label="opencode.json"
+                  value={config.pipeline.opencode_config || ""}
+                  onChange={setPipeline("opencode_config")}
+                  rows={8}
+                  isCode
+                  placeholder={'{\n  "provider": {\n    "name": "openai",\n    "apiKey": "sk-..."\n  },\n  "model": "gpt-4o"\n}'}
+                />
+              </Card>
+            )}
             <StepNav onNext={saveAndNext} saving={saving} />
           </div>
         )}
@@ -403,7 +463,7 @@ function SetupWizard({ config, setConfig, onLaunch, launching }) {
               <div style={{ padding: "16px 18px", background: colors.input, borderRadius: 8, border: `1px solid ${colors.border}`, marginBottom: 14 }}>
                 <p style={{ margin: "0 0 12px", fontSize: 12, color: colors.muted, fontFamily: mono, letterSpacing: "0.08em", textTransform: "uppercase" }}>Required repository permissions</p>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 16px" }}>
-                  {[["Contents", "Read & write", "clone + push"], ["Pull requests", "Read & write", "opens the PR"], ["Issues", "Read & write", "labels + comments"], ["Metadata", "Read", "required"]].map(([scope, level, note]) => (
+                  {[["Contents", "Read & write", "clone + push"], ["Pull requests", "Read & write", "opens the PR"], ["Issues", "Read & write", "labels + comments + create"], ["Metadata", "Read", "required + repo listing"]].map(([scope, level, note]) => (
                     <div key={scope} style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                       <span style={{ fontSize: 12, color: colors.green, fontFamily: mono }}>✓</span>
                       <div>
@@ -414,20 +474,76 @@ function SetupWizard({ config, setConfig, onLaunch, launching }) {
                     </div>
                   ))}
                 </div>
+                <p style={{ margin: "12px 0 0", fontSize: 12, color: colors.dim, fontFamily: mono }}>
+                  Fine-grained PAT: set <span style={{ color: colors.text }}>Repository access → All repositories</span> to enable the terminal repo picker.
+                </p>
               </div>
             </Card>
 
             <Card style={{ marginTop: 16 }}>
               <CardTitle icon="⚡">Webhook</CardTitle>
-              <Field label="Webhook Secret" value={config.github.webhook_secret} onChange={setGithub("webhook_secret")} type="password" placeholder="a long random string" isCode />
-              <div style={{ padding: "14px 18px", background: colors.input, borderRadius: 8, border: `1px solid ${colors.border}` }}>
-                <p style={{ margin: "0 0 8px", fontSize: 12, color: colors.muted, fontFamily: mono, letterSpacing: "0.08em", textTransform: "uppercase" }}>Configure on GitHub</p>
-                <p style={{ margin: 0, fontSize: 13, color: colors.muted, fontFamily: mono, lineHeight: 1.9 }}>
-                  repo → Settings → Webhooks → Add webhook<br />
-                  Payload URL: <span style={{ color: colors.cyan }}>https://your-server:8080/webhook/github</span><br />
-                  Content type: <span style={{ color: colors.text }}>application/json</span> · Events: <span style={{ color: colors.text }}>Issues</span>
-                </p>
+              <p style={{ margin: "-4px 0 16px", fontSize: 13, color: colors.muted, fontFamily: mono }}>
+                GitHub calls this URL when an issue is labeled. Each user has a unique URL tied to their account.
+              </p>
+
+              {/* Step-by-step guide */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
+                {[
+                  {
+                    n: "1",
+                    title: "Go to your repository on GitHub",
+                    body: <span>Open <span style={{ color: colors.cyan }}>Settings → Webhooks → Add webhook</span></span>,
+                  },
+                  {
+                    n: "2",
+                    title: "Set the Payload URL",
+                    body: (
+                      <div>
+                        <p style={{ margin: "0 0 6px", fontSize: 12, color: colors.muted, fontFamily: mono }}>Copy this URL — it is unique to your account:</p>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 6, padding: "8px 12px" }}>
+                          <span style={{ flex: 1, fontSize: 13, color: colors.cyan, fontFamily: mono, wordBreak: "break-all" }}>
+                            {window.location.origin}/webhook/github/{auth?.sub ?? "…"}
+                          </span>
+                          <button
+                            onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/webhook/github/${auth?.sub ?? ""}`)}
+                            style={{ flexShrink: 0, background: "none", border: `1px solid ${colors.border}`, borderRadius: 4, color: colors.muted, cursor: "pointer", padding: "3px 10px", fontSize: 12, fontFamily: mono }}
+                          >copy</button>
+                        </div>
+                      </div>
+                    ),
+                  },
+                  {
+                    n: "3",
+                    title: "Content type",
+                    body: <span>Set to <span style={{ color: colors.text, fontFamily: mono }}>application/json</span></span>,
+                  },
+                  {
+                    n: "4",
+                    title: "Choose a webhook secret",
+                    body: <span>Generate a random string (e.g. <span style={{ color: colors.text, fontFamily: mono }}>openssl rand -hex 32</span>), paste it below <em>and</em> in GitHub.</span>,
+                  },
+                  {
+                    n: "5",
+                    title: "Select events",
+                    body: <span>Choose <span style={{ color: colors.text }}>Let me select individual events</span> → tick <span style={{ color: colors.text }}>Issues</span> only.</span>,
+                  },
+                  {
+                    n: "6",
+                    title: "Save",
+                    body: <span>Click <span style={{ color: colors.text }}>Add webhook</span>. GitHub will send a ping — a ✓ means Torch is reachable.</span>,
+                  },
+                ].map(({ n, title, body }) => (
+                  <div key={n} style={{ display: "flex", gap: 14 }}>
+                    <div style={{ flexShrink: 0, width: 24, height: 24, borderRadius: "50%", background: `${colors.cyan}22`, border: `1px solid ${colors.cyan}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: colors.cyan, fontFamily: mono, fontWeight: 700 }}>{n}</div>
+                    <div style={{ paddingTop: 2 }}>
+                      <p style={{ margin: "0 0 4px", fontSize: 13, color: colors.text, fontFamily: mono, fontWeight: 600 }}>{title}</p>
+                      <p style={{ margin: 0, fontSize: 13, color: colors.muted, fontFamily: mono, lineHeight: 1.7 }}>{body}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
+
+              <Field label="Webhook Secret" value={config.github.webhook_secret} onChange={setGithub("webhook_secret")} type="password" placeholder="openssl rand -hex 32" isCode hint="Must match exactly what you entered in GitHub." />
             </Card>
 
             <div style={{ marginTop: 28 }}>
@@ -966,9 +1082,331 @@ function RunsList({ runs }) {
   );
 }
 
+// ─── Terminal panel ───────────────────────────────────────────────────────────
+
+// Key sequences sent by the mobile toolbar
+const TOOLBAR_KEYS = [
+  { label: "Tab",    seq: "\t" },
+  { label: "↑",      seq: "\x1b[A" },
+  { label: "↓",      seq: "\x1b[B" },
+  { label: "←",      seq: "\x1b[D" },
+  { label: "→",      seq: "\x1b[C" },
+  { label: "Ctrl+C", seq: "\x03" },
+  { label: "Ctrl+D", seq: "\x04" },
+];
+
+// TerminalSession: PTY over WebSocket with fullscreen, key toolbar, auto-reconnect.
+function TerminalSession({ auth, repo, onDisconnect }) {
+  const containerRef  = useRef(null);
+  const wrapperRef    = useRef(null);
+  const fitRef        = useRef(null);
+  const termRef       = useRef(null);
+  const wsRef         = useRef(null);
+  const manualClose   = useRef(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // In fullscreen: follow the visual viewport so the toolbar stays above the keyboard.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!isFullscreen || !vv) return;
+    const update = () => {
+      const el = wrapperRef.current;
+      if (!el) return;
+      el.style.top    = `${vv.offsetTop}px`;
+      el.style.height = `${vv.height}px`;
+      fitRef.current?.fit();
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => { vv.removeEventListener("resize", update); vv.removeEventListener("scroll", update); };
+  }, [isFullscreen]);
+
+  // Refit terminal after fullscreen toggle.
+  useEffect(() => {
+    const t = setTimeout(() => fitRef.current?.fit(), 60);
+    return () => clearTimeout(t);
+  }, [isFullscreen]);
+
+  // Send raw bytes to the PTY.
+  const sendSeq = (seq) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN)
+      wsRef.current.send(new TextEncoder().encode(seq));
+  };
+
+  const handlePaste = async () => {
+    try { const t = await navigator.clipboard.readText(); if (t) sendSeq(t); } catch {}
+  };
+
+  // Connect (or reconnect) to the PTY WebSocket.
+  useLayoutEffect(() => {
+    let term, fitAddon;
+    let reconnectTimer = null;
+    let reconnectDelay = 1000;
+    let cancelled = false;
+
+    const connect = () => {
+      if (cancelled) return;
+      const token = auth?.token ?? "";
+      if (!token) { termRef.current?.writeln("\x1b[31m[no auth token — please log in again]\x1b[0m"); return; }
+
+      fetch("/api/status", { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => {
+          if (cancelled) return;
+          if (res.status === 401) { termRef.current?.writeln("\x1b[31m[session expired — please log in again]\x1b[0m"); return; }
+
+          const proto    = location.protocol === "https:" ? "wss:" : "ws:";
+          const repoParam = repo ? `&repo=${encodeURIComponent(repo)}` : "";
+          const ws = new WebSocket(`${proto}//${location.host}/ws/terminal?token=${encodeURIComponent(token)}${repoParam}`);
+          wsRef.current = ws;
+          ws.binaryType = "arraybuffer";
+
+          ws.onopen = () => {
+            reconnectDelay = 1000; // reset backoff on success
+            const t = termRef.current;
+            if (t) ws.send(JSON.stringify({ type: "resize", rows: t.rows, cols: t.cols }));
+          };
+          ws.onmessage = (e) => { if (e.data instanceof ArrayBuffer) termRef.current?.write(new Uint8Array(e.data)); };
+          ws.onerror   = () => { if (!cancelled) termRef.current?.writeln("\r\n\x1b[31m[connection error]\x1b[0m"); };
+          ws.onclose   = () => {
+            wsRef.current = null;
+            if (cancelled || manualClose.current) {
+              termRef.current?.writeln("\r\n\x1b[33m[session ended]\x1b[0m");
+              return;
+            }
+            // Auto-reconnect with exponential backoff (max 30s)
+            const delay = reconnectDelay;
+            reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+            termRef.current?.writeln(`\r\n\x1b[33m[disconnected — reconnecting in ${Math.round(delay / 1000)}s…]\x1b[0m`);
+            reconnectTimer = setTimeout(connect, delay);
+          };
+        })
+        .catch(() => { if (!cancelled) termRef.current?.writeln("\x1b[31m[cannot reach backend]\x1b[0m"); });
+    };
+
+    Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")])
+      .then(([{ Terminal }, { FitAddon }]) => {
+        if (cancelled) return;
+        term = new Terminal({
+          cursorBlink: true, fontSize: 14,
+          fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+          theme: {
+            background: "#12100e", foreground: "#f0ebe4", cursor: "#f59e0b",
+            selectionBackground: "#f59e0b40",
+            black: "#12100e", brightBlack: "#4a3f38",
+            red: "#f87171", brightRed: "#fca5a5", green: "#6ee7b7", brightGreen: "#a7f3d0",
+            yellow: "#f59e0b", brightYellow: "#fcd34d", blue: "#60a5fa", brightBlue: "#93c5fd",
+            magenta: "#a78bfa", brightMagenta: "#c4b5fd", cyan: "#22d3ee", brightCyan: "#67e8f9",
+            white: "#f0ebe4", brightWhite: "#ffffff",
+          },
+        });
+        fitAddon = new FitAddon();
+        term.loadAddon(fitAddon);
+        fitRef.current = fitAddon;
+        termRef.current = term;
+
+        if (containerRef.current) { term.open(containerRef.current); fitAddon.fit(); }
+
+        // Input handlers reference wsRef so they survive reconnects without re-registering.
+        term.onData(data => { if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(new TextEncoder().encode(data)); });
+        term.onResize(({ rows, cols }) => { if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ type: "resize", rows, cols })); });
+
+        const onWinResize = () => fitAddon?.fit();
+        window.addEventListener("resize", onWinResize);
+        connect();
+
+        // cleanup returns a function — handled by outer return below
+        return () => window.removeEventListener("resize", onWinResize);
+      });
+
+    return () => {
+      cancelled = true;
+      manualClose.current = true;
+      clearTimeout(reconnectTimer);
+      wsRef.current?.close();
+      term?.dispose();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const titleLabel = repo ? `groom — ${repo}` : "bash — /workspaces";
+
+  const wrapperStyle = isFullscreen
+    ? { position: "fixed", left: 0, right: 0, top: 0, height: "100dvh", zIndex: 9999,
+        display: "flex", flexDirection: "column", background: "#12100e" }
+    : { display: "flex", flexDirection: "column", background: "#12100e",
+        borderRadius: 10, border: `1px solid ${colors.border}`, overflow: "hidden" };
+
+  const btnSm  = { background: "none", border: `1px solid ${colors.border}`, borderRadius: 4, color: colors.muted, cursor: "pointer", padding: "3px 10px", fontSize: 11, fontFamily: mono };
+  const keyBtn = { background: colors.input, border: `1px solid ${colors.border}`, borderRadius: 5, color: colors.text, cursor: "pointer", padding: "9px 14px", fontFamily: mono, fontSize: 13, flexShrink: 0, userSelect: "none", WebkitUserSelect: "none", touchAction: "manipulation" };
+
+  return (
+    <div ref={wrapperRef} style={wrapperStyle}>
+
+      {/* ── Titlebar ─────────────────────────────── */}
+      <div style={{ padding: "10px 16px", background: colors.surface, borderBottom: `1px solid ${colors.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", gap: 6 }}>
+            {["#f87171","#f59e0b","#6ee7b7"].map(c => <div key={c} style={{ width: 12, height: 12, borderRadius: "50%", background: c }} />)}
+          </div>
+          <span style={{ fontSize: 12, color: colors.muted, fontFamily: mono }}>{titleLabel}</span>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={() => setIsFullscreen(f => !f)} style={btnSm}>
+            {isFullscreen ? "⊡ exit" : "⊞ full"}
+          </button>
+          <button onClick={() => { manualClose.current = true; onDisconnect(); }} style={btnSm}>
+            ✕ close
+          </button>
+        </div>
+      </div>
+
+      {/* ── xterm container ───────────────────────── */}
+      <div ref={containerRef} style={{ flex: 1, minHeight: isFullscreen ? 0 : 320, overflow: "hidden" }} />
+
+      {/* ── Key toolbar ───────────────────────────── */}
+      {/* onPointerDown + preventDefault keeps focus (and keyboard) in the terminal */}
+      <div style={{ background: colors.surface, borderTop: `1px solid ${colors.border}`, display: "flex", gap: 6, padding: "8px 10px", overflowX: "auto", flexShrink: 0, WebkitOverflowScrolling: "touch" }}>
+        {TOOLBAR_KEYS.map(({ label, seq }) => (
+          <button key={label} onPointerDown={e => { e.preventDefault(); sendSeq(seq); }} style={keyBtn}>
+            {label}
+          </button>
+        ))}
+        <button onPointerDown={e => { e.preventDefault(); handlePaste(); }} style={{ ...keyBtn, color: colors.cyan, marginLeft: "auto" }}>
+          paste
+        </button>
+      </div>
+
+    </div>
+  );
+}
+
+// TerminalPanel shows a repo picker, then opens the terminal session.
+function TerminalPanel({ auth }) {
+  const [activeRepo, setActive] = useState(null); // null = picker
+
+  if (activeRepo !== null) {
+    return (
+      <TerminalSession
+        auth={auth}
+        repo={activeRepo || undefined}
+        onDisconnect={() => setActive(null)}
+      />
+    );
+  }
+
+  return <RepoPicker onSelect={setActive} />;
+}
+
+function RepoPicker({ onSelect }) {
+  const [repos,   setRepos]   = useState(null);  // null = loading
+  const [error,   setError]   = useState(null);
+  const [filter,  setFilter]  = useState("");
+  const [custom,  setCustom]  = useState("");
+
+  useEffect(() => {
+    api.listRepos()
+      .then(setRepos)
+      .catch(err => setError(err?.message ?? "Could not load repos"));
+  }, []);
+
+  const filtered = (repos ?? []).filter(r =>
+    r.toLowerCase().includes(filter.toLowerCase())
+  );
+
+  const inputStyle = {
+    width: "100%", background: colors.input, border: `1px solid ${colors.border}`,
+    borderRadius: 6, padding: "10px 14px", color: colors.text,
+    fontSize: 14, fontFamily: mono, outline: "none", boxSizing: "border-box",
+  };
+
+  return (
+    <div style={{ maxWidth: 580, margin: "0 auto", paddingTop: 32 }}>
+      <Card>
+        <CardTitle icon="⬛">Open Terminal</CardTitle>
+
+        {/* Repo list */}
+        <p style={{ margin: "0 0 12px", fontSize: 12, color: colors.muted, fontFamily: mono, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+          Your repositories
+        </p>
+
+        {error && (
+          <p style={{ margin: "0 0 12px", fontSize: 13, color: colors.red, fontFamily: mono }}>{error}</p>
+        )}
+
+        {repos === null && !error && (
+          <p style={{ color: colors.dim, fontFamily: mono, fontSize: 13, marginBottom: 12 }}>Loading…</p>
+        )}
+
+        {repos !== null && (
+          <>
+            <input
+              value={filter}
+              onChange={e => setFilter(e.target.value)}
+              placeholder="Filter repos…"
+              style={{ ...inputStyle, marginBottom: 8 }}
+              autoFocus
+            />
+            <div style={{ maxHeight: 220, overflowY: "auto", border: `1px solid ${colors.border}`, borderRadius: 6, marginBottom: 16 }}>
+              {filtered.length === 0 ? (
+                <p style={{ margin: 0, padding: "12px 14px", color: colors.dim, fontFamily: mono, fontSize: 13 }}>
+                  {repos.length === 0 ? "No repos found — check your GitHub token scope." : "No match."}
+                </p>
+              ) : (
+                filtered.map(r => (
+                  <button key={r} onClick={() => onSelect(r)} style={{
+                    display: "block", width: "100%", textAlign: "left",
+                    background: "none", border: "none", borderBottom: `1px solid ${colors.border}`,
+                    padding: "10px 14px", color: colors.text, cursor: "pointer",
+                    fontFamily: mono, fontSize: 13,
+                    transition: "background 0.1s",
+                  }}
+                  onMouseEnter={e => e.target.style.background = colors.surface}
+                  onMouseLeave={e => e.target.style.background = "none"}
+                  >
+                    {r}
+                  </button>
+                ))
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Custom repo */}
+        <p style={{ margin: "0 0 8px", fontSize: 12, color: colors.muted, fontFamily: mono, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+          Or enter manually
+        </p>
+        <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+          <input
+            value={custom}
+            onChange={e => setCustom(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && custom && onSelect(custom)}
+            placeholder="owner/repo"
+            style={{ ...inputStyle, flex: 1, marginBottom: 0 }}
+          />
+          <Btn variant="primary" onClick={() => onSelect(custom)} disabled={!custom}>
+            Clone
+          </Btn>
+        </div>
+
+        <div style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <button onClick={() => onSelect("")} style={{
+            background: "none", border: "none", color: colors.muted, cursor: "pointer",
+            fontFamily: mono, fontSize: 12, textDecoration: "underline",
+          }}>
+            Open plain shell (no clone)
+          </button>
+          <div style={{ fontSize: 12, color: colors.dim, fontFamily: mono, textAlign: "right" }}>
+            workflow: run <span style={{ color: colors.cyan }}>claude</span> → write <span style={{ color: colors.green }}>issue.json</span> → run <span style={{ color: colors.green }}>create_issue</span>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
-function Dashboard({ config, setConfig, onStop, status }) {
+function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onLogout, auth, onReset }) {
   const [dashTab, setDashTab] = useState("monitor");
   const setAgent    = (role) => (val) => setConfig(c => ({ ...c, agents: { ...c.agents, [role]: val } }));
   const setGithub   = (key)  => (val) => setConfig(c => ({ ...c, github:   { ...c.github,   [key]: val } }));
@@ -994,14 +1432,23 @@ function Dashboard({ config, setConfig, onStop, status }) {
 
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 36 }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-              <div style={{ width: 9, height: 9, borderRadius: "50%", background: colors.green, boxShadow: `0 0 10px ${colors.green}`, animation: "pulse 2s infinite" }} />
-              <span style={{ fontSize: 13, letterSpacing: "0.2em", color: colors.green, textTransform: "uppercase", fontFamily: mono }}>live</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <img src="/logo-48.png" alt="Torch" style={{ width: 48, height: 48, borderRadius: 12 }} />
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: colors.green, boxShadow: `0 0 10px ${colors.green}`, animation: "pulse 2s infinite" }} />
+                <span style={{ fontSize: 12, letterSpacing: "0.2em", color: colors.green, textTransform: "uppercase", fontFamily: mono }}>live</span>
+              </div>
+              <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, color: colors.white, letterSpacing: "-0.02em" }}>Torch</h1>
             </div>
-            <h1 style={{ margin: 0, fontSize: 32, fontWeight: 800, color: colors.white, letterSpacing: "-0.02em" }}>Torch</h1>
           </div>
-          <Btn variant="danger" onClick={onStop}>■ Stop Pipeline</Btn>
+          <div style={{ display: "flex", gap: 10 }}>
+            {status?.active
+              ? <Btn variant="danger" onClick={onStop}>■ Stop</Btn>
+              : <Btn variant="primary" onClick={onLaunch} disabled={launching}>{launching ? "Starting…" : "▶ Start Pipeline"}</Btn>
+            }
+            <Btn variant="ghost" onClick={onLogout}>Logout</Btn>
+          </div>
         </div>
 
         {/* Stats */}
@@ -1012,16 +1459,16 @@ function Dashboard({ config, setConfig, onStop, status }) {
           <StatCard label="Failed"    value={q.failed    ?? 0} color={colors.red}    sub="needs attention" />
         </div>
 
-        {/* Tabs: Monitor | Issues | Settings */}
-        <div style={{ display: "flex", borderBottom: `1px solid ${colors.border}`, marginBottom: 24 }}>
-          {[["monitor", "Monitor"], ["issues", "Issues"], ["settings", "Settings"]].map(([id, label]) => (
+        {/* Tabs */}
+        <div style={{ display: "flex", borderBottom: `1px solid ${colors.border}`, marginBottom: 24, overflowX: "auto" }}>
+          {[["monitor", "Monitor"], ["terminal", "Terminal"], ["issues", "Issues"], ["settings", "Settings"]].map(([id, label]) => (
             <button key={id} onClick={() => setDashTab(id)} style={{
               padding: "10px 22px", background: "none", border: "none",
               borderBottom: `2px solid ${dashTab === id ? colors.cyan : "transparent"}`,
               color: dashTab === id ? colors.cyan : colors.muted,
               cursor: "pointer", fontFamily: mono, fontSize: 13, fontWeight: 600,
               letterSpacing: "0.08em", textTransform: "uppercase",
-              transition: "all 0.15s", marginBottom: -1,
+              transition: "all 0.15s", marginBottom: -1, whiteSpace: "nowrap",
             }}>{label}</button>
           ))}
         </div>
@@ -1069,6 +1516,11 @@ function Dashboard({ config, setConfig, onStop, status }) {
           </div>
         )}
 
+        {/* Terminal tab */}
+        {dashTab === "terminal" && (
+          <TerminalPanel auth={auth} />
+        )}
+
         {/* Issues tab */}
         {dashTab === "issues" && (
           <IssuesPanel triggerLabel={config.github.trigger_label} pipelineActive={status?.active} config={config} setConfig={setConfig} />
@@ -1083,7 +1535,7 @@ function Dashboard({ config, setConfig, onStop, status }) {
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 20 }}>
               {["developer", "tester", "reviewer"].map(role => (
-                <AgentCard key={role} role={role} config={config.agents[role]} onChange={setAgent(role)} />
+                <AgentCard key={role} role={role} config={config.agents[role] ?? defaultAgent(role)} onChange={setAgent(role)} />
               ))}
             </div>
 
@@ -1101,7 +1553,9 @@ function Dashboard({ config, setConfig, onStop, status }) {
                 <Field label="Test Command"   value={config.pipeline.test_command || ""} onChange={setPipeline("test_command")} placeholder="flutter test"    isCode hint="{test_command} in prompts" />
                 <Field label="Lint Command"   value={config.pipeline.lint_command || ""} onChange={setPipeline("lint_command")} placeholder="flutter analyze" isCode hint="{lint_command} in prompts" />
                 <ExtraEnvEditor value={config.pipeline.extra_env || {}} onChange={setPipeline("extra_env")} />
-                <Field label="Opencode Config (opencode.json)" value={config.pipeline.opencode_config || ""} onChange={setPipeline("opencode_config")} rows={10} isCode placeholder={'{\n  "provider": { ... },\n  "model": "vllm/vllm/mimir"\n}'} hint="Injected into each workspace. All 3 agents share the same file." />
+                {Object.values(config.agents).some(a => a.cli === "opencode") && (
+                  <Field label="Opencode Config (opencode.json)" value={config.pipeline.opencode_config || ""} onChange={setPipeline("opencode_config")} rows={10} isCode placeholder={'{\n  "provider": { ... },\n  "model": "vllm/vllm/mimir"\n}'} hint="Injected into each workspace. All 3 agents share the same file." />
+                )}
                 <div>
                   <label style={{ fontSize: 12, letterSpacing: "0.1em", color: colors.muted, textTransform: "uppercase", fontFamily: mono, display: "block", marginBottom: 8 }}>Max Fix Rounds</label>
                   <div style={{ display: "flex", gap: 6 }}>
@@ -1111,7 +1565,16 @@ function Dashboard({ config, setConfig, onStop, status }) {
               </Card>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <Btn variant="danger" onClick={async () => {
+                if (!confirm("Reset all configuration? This will clear agents, GitHub token, and pipeline settings.")) return;
+                const blank = emptyConfig();
+                await api.saveConfig(blank);
+                setConfig(blank);
+                onReset();
+              }}>
+                Reset to defaults
+              </Btn>
               <Btn variant={saved ? "primary" : "default"} onClick={saveSettings} disabled={saving}>
                 {saving ? "Saving..." : saved ? "✓ Saved" : "Save Changes"}
               </Btn>
@@ -1120,11 +1583,133 @@ function Dashboard({ config, setConfig, onStop, status }) {
         )}
 
         <p style={{ margin: 0, fontSize: 12, color: colors.dim, fontFamily: mono, textAlign: "center" }}>
-          refreshing every 5s · webhook active on <span style={{ color: colors.dim }}>/webhook/github</span>
+          refreshing every 5s · webhook: <span style={{ color: colors.dim }}>{window.location.origin}/webhook/github/{auth?.sub ?? "…"}</span>
         </p>
       </div>
 
       <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }`}</style>
+    </div>
+  );
+}
+
+// ─── Login page ───────────────────────────────────────────────────────────────
+
+function LoginPage({ onLogin }) {
+  const [email,        setEmail]        = useState("");
+  const [password,     setPassword]     = useState("");
+  const [tfaCode,      setTfaCode]      = useState("");
+  const [totpSession,  setTotpSession]  = useState(null);
+  const [isLoading,    setIsLoading]    = useState(false);
+  const [error,        setError]        = useState(null);
+
+  const inputStyle = {
+    width: "100%", background: colors.input, border: `1px solid ${colors.border}`,
+    borderRadius: 6, padding: "10px 14px", color: colors.text,
+    fontSize: 15, fontFamily: sans, outline: "none", boxSizing: "border-box",
+    transition: "border-color 0.15s",
+  };
+  const onFocus = (e) => (e.target.style.borderColor = colors.borderHover);
+  const onBlur  = (e) => (e.target.style.borderColor = colors.border);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    if (!email.endsWith("@cubbit.io")) {
+      setError("Only Cubbiters can access");
+      return;
+    }
+    setError(null);
+    setIsLoading(true);
+    try {
+      const { login } = await import("./cubbitAuth.js");
+      const result = await login(email, password);
+      if (result.totpSessionId) {
+        setTotpSession(result.totpSessionId);
+      } else {
+        onLogin(result.token);
+      }
+    } catch (err) {
+      setError(err.message || "Login failed");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleTFA = async (e) => {
+    e.preventDefault();
+    if (!totpSession) return;
+    setError(null);
+    setIsLoading(true);
+    try {
+      const { verifyTFAAndLogin } = await import("./cubbitAuth.js");
+      const token = await verifyTFAAndLogin(totpSession, tfaCode);
+      onLogin(token);
+    } catch (err) {
+      setError(err.message || "TFA verification failed");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: colors.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: sans }}>
+      <div style={{ width: "100%", maxWidth: 420, padding: "0 20px" }}>
+        <div style={{ textAlign: "center", marginBottom: 36 }}>
+          <img src="/logo.png" alt="Torch" style={{ width: 120, height: 120, margin: "0 auto 8px", display: "block", borderRadius: 28 }} />
+          <p style={{ margin: 0, fontSize: 13, color: colors.muted, fontFamily: mono }}>sign in with your Cubbit account</p>
+        </div>
+
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: 28 }}>
+          {error && (
+            <div style={{ background: `${colors.red}15`, border: `1px solid ${colors.red}40`, borderRadius: 6, padding: "10px 14px", marginBottom: 20 }}>
+              <p style={{ margin: 0, fontSize: 13, color: colors.red, fontFamily: mono }}>{error}</p>
+            </div>
+          )}
+
+          {!totpSession ? (
+            <form onSubmit={handleLogin}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontSize: 12, letterSpacing: "0.1em", color: colors.muted, textTransform: "uppercase", marginBottom: 6, fontFamily: mono }}>Email</label>
+                <input type="email" value={email} onChange={e => setEmail(e.target.value)} style={inputStyle} placeholder="you@cubbit.io" required disabled={isLoading} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div style={{ marginBottom: 24 }}>
+                <label style={{ display: "block", fontSize: 12, letterSpacing: "0.1em", color: colors.muted, textTransform: "uppercase", marginBottom: 6, fontFamily: mono }}>Password</label>
+                <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} placeholder="••••••••" required disabled={isLoading} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <button type="submit" disabled={isLoading} style={{
+                width: "100%", padding: "11px 24px", borderRadius: 8,
+                border: `1px solid ${colors.green}`, cursor: isLoading ? "not-allowed" : "pointer",
+                fontFamily: mono, fontSize: 13, fontWeight: 600, letterSpacing: "0.05em",
+                background: `${colors.green}22`, color: colors.green, opacity: isLoading ? 0.5 : 1,
+                transition: "all 0.2s",
+              }}>
+                {isLoading ? "Signing in…" : "Sign In"}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleTFA}>
+              <div style={{ textAlign: "center", marginBottom: 16 }}>
+                <p style={{ margin: 0, fontSize: 13, color: colors.muted, fontFamily: mono }}>Enter your 2FA code</p>
+              </div>
+              <div style={{ marginBottom: 24 }}>
+                <input type="text" value={tfaCode} onChange={e => setTfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  style={{ ...inputStyle, textAlign: "center", fontSize: 28, letterSpacing: "0.4em", fontFamily: mono }}
+                  placeholder="000000" maxLength={6} required disabled={isLoading} autoFocus
+                  onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button type="button" onClick={() => { setTotpSession(null); setTfaCode(""); }} disabled={isLoading}
+                  style={{ flex: 1, padding: "11px 0", borderRadius: 8, border: `1px solid ${colors.border}`, cursor: "pointer", fontFamily: mono, fontSize: 13, fontWeight: 600, background: "transparent", color: colors.muted }}>
+                  Back
+                </button>
+                <button type="submit" disabled={isLoading || tfaCode.length < 6}
+                  style={{ flex: 1, padding: "11px 0", borderRadius: 8, border: `1px solid ${colors.green}`, cursor: isLoading || tfaCode.length < 6 ? "not-allowed" : "pointer", fontFamily: mono, fontSize: 13, fontWeight: 600, background: `${colors.green}22`, color: colors.green, opacity: isLoading || tfaCode.length < 6 ? 0.5 : 1 }}>
+                  {isLoading ? "Verifying…" : "Verify"}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1156,24 +1741,89 @@ function SectionTitle({ children, style: s }) {
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [config,       setConfig]       = useState(emptyConfig());
-  const [status,       setStatus]       = useState(null);
-  const [loading,      setLoading]      = useState(true);
-  const [loadError,    setLoadError]    = useState(null);
-  const [launching, setLaunching] = useState(false);
+  const [config,       setConfig]      = useState(emptyConfig());
+  const [status,       setStatus]      = useState(null);
+  const [loading,      setLoading]     = useState(true);
+  const [loadError,    setLoadError]   = useState(null);
+  const [launching,    setLaunching]   = useState(false);
+  const [auth,         setAuth]        = useState(() => loadAuthWithoutExpiry());
+  // true only when the backend already has a saved GitHub token
+  const [isConfigured, setIsConfigured] = useState(false);
   const pollRef = useRef(null);
 
   const loadAll = useCallback(async () => {
     const [cfg, st] = await Promise.all([api.getConfig(), api.getStatus()]);
     setConfig(cfg);
     setStatus(st);
+    setIsConfigured(!!cfg.github?.token);
   }, []);
 
+  const handleLogout = useCallback(() => {
+    // Fire-and-forget: try to invalidate server-side session
+    const stored = localStorage.getItem("torch_auth");
+    if (stored) {
+      try {
+        const { token } = JSON.parse(stored);
+        if (token) fetch("/api/session", { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+      } catch {}
+    }
+    clearAuth();
+    setAuth(null);
+    setStatus(null);
+    setIsConfigured(false);
+    setLoadError(null);
+    setLoading(false);
+  }, []);
+
+  const handleLogin = useCallback(async (tokenResponse) => {
+    // Exchange the Cubbit JWT for a local session token issued by our backend.
+    const cubbitJWT = tokenResponse?.token;
+    if (!cubbitJWT || typeof cubbitJWT !== "string") {
+      setLoadError("Invalid Cubbit token received");
+      return;
+    }
+    let sessionToken, accountId;
+    try {
+      const res = await fetch("/api/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cubbit_token: cubbitJWT }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Session creation failed");
+      }
+      ({ session_token: sessionToken, account_id: accountId } = await res.json());
+    } catch (err) {
+      setLoadError(err.message);
+      return;
+    }
+    const newAuth = saveAuth(sessionToken, accountId);
+    setAuth(newAuth);
+    setLoadError(null);
+    setLoading(true);
+    try {
+      await loadAll();
+    } catch (err) {
+      if (err?.status === 401) handleLogout();
+      else setLoadError(err?.message || "Failed to connect");
+    } finally {
+      setLoading(false);
+    }
+  }, [loadAll, handleLogout]);
+
   useEffect(() => {
+    if (!auth) {
+      setLoading(false);
+      return;
+    }
     loadAll()
-      .catch(err => setLoadError(err.message))
+      .catch(err => {
+        if (err?.status === 401) handleLogout();
+        else setLoadError(err?.message || "Failed to connect");
+      })
       .finally(() => setLoading(false));
-  }, [loadAll]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll status every 5s when active
   useEffect(() => {
@@ -1192,6 +1842,7 @@ export default function App() {
       await api.start();
       const st = await api.getStatus();
       setStatus(st);
+      setIsConfigured(true); // wizard complete — move to Dashboard
     } catch {}
     setLaunching(false);
   };
@@ -1208,6 +1859,8 @@ export default function App() {
     </div>
   );
 
+  if (!auth) return <LoginPage onLogin={handleLogin} />;
+
   if (loadError) return (
     <div style={{ minHeight: "100vh", background: colors.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ textAlign: "center" }}>
@@ -1218,9 +1871,9 @@ export default function App() {
     </div>
   );
 
-  if (status?.active) {
-    return <Dashboard config={config} setConfig={setConfig} onStop={handleStop} status={status} />;
+  if (status && isConfigured) {
+    return <Dashboard config={config} setConfig={setConfig} onStop={handleStop} onLaunch={handleLaunch} launching={launching} status={status} onLogout={handleLogout} auth={auth} onReset={() => setIsConfigured(false)} />;
   }
 
-  return <SetupWizard config={config} setConfig={setConfig} onLaunch={handleLaunch} launching={launching} />;
+  return <SetupWizard config={config} setConfig={setConfig} onLaunch={handleLaunch} launching={launching} onLogout={handleLogout} auth={auth} />;
 }

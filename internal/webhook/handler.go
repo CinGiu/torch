@@ -5,23 +5,37 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"strings"
 
-	"torch/internal/config"
+	"torch/internal/store"
 	"torch/internal/worker"
 )
 
 type Handler struct {
-	cfgMgr     *config.Manager
+	store      *store.Store
 	dispatcher *worker.Dispatcher
 }
 
-func NewHandler(cfgMgr *config.Manager, dispatcher *worker.Dispatcher) *Handler {
-	return &Handler{cfgMgr: cfgMgr, dispatcher: dispatcher}
+func NewHandler(st *store.Store, dispatcher *worker.Dispatcher) *Handler {
+	return &Handler{store: st, dispatcher: dispatcher}
 }
 
+// Handle serves POST /webhook/github/{accountID}.
+// Each user has their own webhook URL so that their per-user config
+// (token, webhook secret, trigger label) is used.
 func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
+	// Extract accountID from path: /webhook/github/{accountID}
+	accountID := strings.TrimPrefix(r.URL.Path, "/webhook/github/")
+	if accountID == "" || strings.Contains(accountID, "/") {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "missing account id in path"})
+		return
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -29,7 +43,13 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := h.cfgMgr.Get()
+	cfg, err := h.store.GetConfig(accountID)
+	if err != nil {
+		slog.Warn("webhook: cannot load config", "account", accountID, "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
 
 	if !validateSignature(cfg.Github.WebhookSecret, r.Header.Get("X-Hub-Signature-256"), body) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -63,6 +83,7 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	task := worker.IssueTask{
+		AccountID:    accountID,
 		IssueNumber:  payload.Issue.Number,
 		IssueTitle:   payload.Issue.Title,
 		IssueBody:    payload.Issue.Body,
@@ -77,12 +98,16 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"status": "queued", "issue": payload.Issue.Number})
+	json.NewEncoder(w).Encode(map[string]any{
+		"status": "queued",
+		"issue":  payload.Issue.Number,
+		"account": fmt.Sprintf("%.8s…", accountID),
+	})
 }
 
 func validateSignature(secret, sigHeader string, body []byte) bool {
 	if secret == "" {
-		return true // skip validation if secret not configured yet
+		return true
 	}
 	if len(sigHeader) < 7 {
 		return false
