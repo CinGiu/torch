@@ -111,7 +111,7 @@ Each agent is an independent AI CLI process (`claude` or `opencode`) running in 
 ### 1. Clone and start
 
 ```bash
-git clone https://github.com/your-org/torch
+git clone git@github.com:CinGiu/torch.git
 cd torch
 docker compose up --build
 ```
