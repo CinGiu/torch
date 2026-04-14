@@ -1,0 +1,3 @@
+torch.miodominio.io {
+    reverse_proxy torch:8080
+}
