@@ -9,6 +9,7 @@ services:
       - CONFIG_PATH=/data/config.json
       - KEEP_WORKSPACE=true
       - LOG_LEVEL=debug
+      - ADMIN_EMAIL=   # set to your Cubbit email to unlock the Admin tab
     volumes:
       - ./data:/data
       - ./workspaces:/workspaces

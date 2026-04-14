@@ -42,8 +42,23 @@ func (s *Store) migrate() error {
 		CREATE TABLE IF NOT EXISTS sessions (
 			id         TEXT PRIMARY KEY,
 			account_id TEXT NOT NULL,
-			expires_at INTEGER NOT NULL
+			expires_at INTEGER NOT NULL,
+			is_admin   INTEGER NOT NULL DEFAULT 0
 		);
+		CREATE TABLE IF NOT EXISTS runs (
+			id           TEXT PRIMARY KEY,
+			account_id   TEXT NOT NULL,
+			repo         TEXT NOT NULL,
+			issue_number INTEGER NOT NULL,
+			issue_title  TEXT NOT NULL DEFAULT '',
+			status       TEXT NOT NULL DEFAULT 'running',
+			started_at   INTEGER NOT NULL,
+			finished_at  INTEGER,
+			error_msg    TEXT NOT NULL DEFAULT '',
+			pr_url       TEXT NOT NULL DEFAULT ''
+		);
+		CREATE INDEX IF NOT EXISTS runs_account_id ON runs(account_id);
+		CREATE INDEX IF NOT EXISTS runs_started_at  ON runs(started_at);
 	`)
 	return err
 }
@@ -51,14 +66,36 @@ func (s *Store) migrate() error {
 // ── Sessions ──────────────────────────────────────────────────────────────────
 
 // CreateSession generates a new opaque session token for accountID (7-day TTL).
-func (s *Store) CreateSession(accountID string) (string, error) {
+// isAdmin marks the session as having admin privileges.
+func (s *Store) CreateSession(accountID string, isAdmin bool) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id := uuid.New().String()
 	expiresAt := time.Now().Add(7 * 24 * time.Hour).Unix()
-	_, err := s.db.Exec(`INSERT INTO sessions (id, account_id, expires_at) VALUES (?, ?, ?)`,
-		id, accountID, expiresAt)
+	adminFlag := 0
+	if isAdmin {
+		adminFlag = 1
+	}
+	_, err := s.db.Exec(`INSERT INTO sessions (id, account_id, expires_at, is_admin) VALUES (?, ?, ?, ?)`,
+		id, accountID, expiresAt, adminFlag)
 	return id, err
+}
+
+// IsAdminSession returns true if the session token belongs to an admin.
+func (s *Store) IsAdminSession(token string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var isAdmin int
+	var expiresAt int64
+	err := s.db.QueryRow(`SELECT is_admin, expires_at FROM sessions WHERE id = ?`, token).
+		Scan(&isAdmin, &expiresAt)
+	if err != nil {
+		return false, err
+	}
+	if time.Now().Unix() > expiresAt {
+		return false, fmt.Errorf("session expired")
+	}
+	return isAdmin == 1, nil
 }
 
 // GetAccountBySession returns the account_id for a valid, non-expired session.
@@ -127,6 +164,150 @@ func (s *Store) SetConfig(accountID string, cfg config.Config) error {
 			updated_at  = excluded.updated_at`,
 		accountID, string(data))
 	return err
+}
+
+// ── Runs ──────────────────────────────────────────────────────────────────────
+
+type RunRow struct {
+	ID          string
+	AccountID   string
+	Repo        string
+	IssueNumber int
+	IssueTitle  string
+	Status      string // running | completed | failed
+	StartedAt   int64
+	FinishedAt  *int64
+	ErrorMsg    string
+	PRURL       string
+}
+
+type UserStat struct {
+	AccountID string
+	Total     int
+	Completed int
+	Failed    int
+	LastRunAt *int64
+}
+
+type AdminStats struct {
+	TotalUsers int `json:"total_users"`
+	TotalRuns  int `json:"total_runs"`
+	RunsToday  int `json:"runs_today"`
+	Completed  int `json:"completed"`
+	Failed     int `json:"failed"`
+	Running    int `json:"running"`
+}
+
+// StartRun records a new pipeline run as "running". Returns the run UUID.
+func (s *Store) StartRun(accountID, repo string, issueNumber int, issueTitle string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := uuid.New().String()
+	_, err := s.db.Exec(`
+		INSERT INTO runs (id, account_id, repo, issue_number, issue_title, status, started_at)
+		VALUES (?, ?, ?, ?, ?, 'running', ?)`,
+		id, accountID, repo, issueNumber, issueTitle, time.Now().Unix())
+	return id, err
+}
+
+// FinishRun marks a run as completed or failed with an optional PR URL.
+func (s *Store) FinishRun(runID, status, errMsg, prURL string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`
+		UPDATE runs SET status=?, finished_at=?, error_msg=?, pr_url=? WHERE id=?`,
+		status, time.Now().Unix(), errMsg, prURL, runID)
+	return err
+}
+
+// ListRuns returns the most recent runs for a single account (newest first).
+func (s *Store) ListRuns(accountID string, limit int) ([]RunRow, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(`
+		SELECT id, account_id, repo, issue_number, issue_title, status,
+		       started_at, finished_at, error_msg, pr_url
+		FROM runs WHERE account_id = ?
+		ORDER BY started_at DESC LIMIT ?`, accountID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanRuns(rows)
+}
+
+// ListAllRuns returns the most recent runs across all accounts (admin).
+func (s *Store) ListAllRuns(limit int) ([]RunRow, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(`
+		SELECT id, account_id, repo, issue_number, issue_title, status,
+		       started_at, finished_at, error_msg, pr_url
+		FROM runs ORDER BY started_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanRuns(rows)
+}
+
+// GetAdminStats returns aggregated run counters across all users.
+func (s *Store) GetAdminStats() (AdminStats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var st AdminStats
+	dayAgo := time.Now().Add(-24 * time.Hour).Unix()
+	err := s.db.QueryRow(`
+		SELECT
+			COUNT(DISTINCT account_id),
+			COUNT(*),
+			SUM(CASE WHEN started_at >= ? THEN 1 ELSE 0 END),
+			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END),
+			SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END),
+			SUM(CASE WHEN status = 'running'   THEN 1 ELSE 0 END)
+		FROM runs`, dayAgo).Scan(
+		&st.TotalUsers, &st.TotalRuns, &st.RunsToday,
+		&st.Completed, &st.Failed, &st.Running)
+	return st, err
+}
+
+// GetUserStats returns per-account run summaries (admin).
+func (s *Store) GetUserStats() ([]UserStat, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(`
+		SELECT account_id,
+		       COUNT(*),
+		       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END),
+		       SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END),
+		       MAX(started_at)
+		FROM runs GROUP BY account_id ORDER BY MAX(started_at) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UserStat
+	for rows.Next() {
+		var u UserStat
+		if err := rows.Scan(&u.AccountID, &u.Total, &u.Completed, &u.Failed, &u.LastRunAt); err != nil {
+			continue
+		}
+		out = append(out, u)
+	}
+	return out, nil
+}
+
+func scanRuns(rows *sql.Rows) ([]RunRow, error) {
+	var out []RunRow
+	for rows.Next() {
+		var r RunRow
+		if err := rows.Scan(&r.ID, &r.AccountID, &r.Repo, &r.IssueNumber, &r.IssueTitle,
+			&r.Status, &r.StartedAt, &r.FinishedAt, &r.ErrorMsg, &r.PRURL); err != nil {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // GetAllConfigs returns all stored user configs, keyed by account_id.

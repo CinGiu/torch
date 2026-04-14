@@ -1,8 +1,8 @@
 const AUTH_KEY = 'torch_auth';
 
 // Stores the local session token returned by POST /api/session.
-export function saveAuth(sessionToken, accountId) {
-  const auth = { token: sessionToken, sub: accountId };
+export function saveAuth(sessionToken, accountId, isAdmin = false) {
+  const auth = { token: sessionToken, sub: accountId, is_admin: isAdmin };
   localStorage.setItem(AUTH_KEY, JSON.stringify(auth));
   return auth;
 }

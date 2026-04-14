@@ -38,6 +38,7 @@ func main() {
 	dbPath         := getEnv("DB_PATH", "/data/torch.db")
 	workspacesDir  := getEnv("WORKSPACES_DIR", "/workspaces")
 	concurrency    := getEnvInt("CONCURRENCY", 4)
+	adminEmail := getEnv("ADMIN_EMAIL", "")
 
 	// ── Store (SQLite, per-user configs) ──────────
 	st, err := store.New(dbPath)
@@ -54,7 +55,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	dispatcher := worker.NewDispatcher(redisAddr)
-	apiHandler := api.NewHandler(st, redisAddr, dispatcher)
+	apiHandler := api.NewHandler(st, redisAddr, dispatcher, adminEmail)
 
 	// Session exchange — no prior auth required
 	mux.HandleFunc("/api/session", func(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +129,32 @@ func main() {
 		}
 		apiHandler.GetLiveLog(w, r)
 	})
+
+	// Admin routes — require both auth + matching ADMIN_ACCOUNT_ID
+	adminMux := http.NewServeMux()
+	adminMux.HandleFunc("/api/admin/runs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		apiHandler.AdminGetRuns(w, r)
+	})
+	adminMux.HandleFunc("/api/admin/users", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		apiHandler.AdminGetUsers(w, r)
+	})
+	adminMux.HandleFunc("/api/admin/stats", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		apiHandler.AdminGetStats(w, r)
+	})
+	mux.Handle("/api/admin/", adminMiddleware(st, adminMux))
+
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -228,6 +255,22 @@ func authMiddleware(st *store.Store, next http.Handler) http.Handler {
 			}
 			ctx := context.WithValue(r.Context(), api.ContextAccountID, accountID)
 			r = r.WithContext(ctx)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// adminMiddleware rejects requests whose session does not have the is_admin flag.
+// Must run after authMiddleware (relies on Bearer token in Authorization header).
+func adminMiddleware(st *store.Store, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		ok, err := st.IsAdminSession(token)
+		if err != nil || !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":"forbidden"}`))
+			return
 		}
 		next.ServeHTTP(w, r)
 	})

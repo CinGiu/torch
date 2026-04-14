@@ -26,7 +26,7 @@ func NewProcessor(st *store.Store, workspacesDir string) *Processor {
 	return &Processor{store: st, workspacesDir: workspacesDir}
 }
 
-func (p *Processor) ProcessIssueTask(ctx context.Context, t *asynq.Task) error {
+func (p *Processor) ProcessIssueTask(ctx context.Context, t *asynq.Task) (retErr error) {
 	var task IssueTask
 	if err := json.Unmarshal(t.Payload(), &task); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
@@ -39,6 +39,17 @@ func (p *Processor) ProcessIssueTask(ctx context.Context, t *asynq.Task) error {
 
 	log := slog.With("account", task.AccountID[:8], "issue", task.IssueNumber, "repo", task.RepoFullName)
 	log.Info("pipeline started")
+
+	// Persist run record; updated on exit via named return.
+	runID, _ := p.store.StartRun(task.AccountID, task.RepoFullName, task.IssueNumber, task.IssueTitle)
+	var prURL string
+	defer func() {
+		if retErr != nil {
+			p.store.FinishRun(runID, "failed", retErr.Error(), "") //nolint
+		} else {
+			p.store.FinishRun(runID, "completed", "", prURL) //nolint
+		}
+	}()
 
 	// Include first 8 chars of account_id to avoid collisions across users
 	workspace := fmt.Sprintf("%s/issue-%s-%d", p.workspacesDir, task.AccountID[:8], task.IssueNumber)
@@ -104,7 +115,7 @@ func (p *Processor) ProcessIssueTask(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("push: %w", err)
 	}
 
-	prURL, err := ghClient.OpenPR(ctx, githubclient.PRRequest{
+	prURL, err = ghClient.OpenPR(ctx, githubclient.PRRequest{
 		RepoFullName: task.RepoFullName,
 		Title:        fmt.Sprintf("[AI] %s", task.IssueTitle),
 		Body:         fmt.Sprintf("Closes #%d\n\n🤖 Implemented by AI pipeline.", task.IssueNumber),

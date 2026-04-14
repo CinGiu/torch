@@ -32,13 +32,15 @@ type Handler struct {
 	store      *store.Store
 	inspector  *asynq.Inspector
 	dispatcher *worker.Dispatcher
+	adminEmail string
 }
 
-func NewHandler(st *store.Store, redisAddr string, dispatcher *worker.Dispatcher) *Handler {
+func NewHandler(st *store.Store, redisAddr string, dispatcher *worker.Dispatcher, adminEmail string) *Handler {
 	return &Handler{
 		store:      st,
 		inspector:  asynq.NewInspector(asynq.RedisClientOpt{Addr: redisAddr}),
 		dispatcher: dispatcher,
+		adminEmail: adminEmail,
 	}
 }
 
@@ -61,24 +63,26 @@ func (h *Handler) ExchangeSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accountID, err := verifyCubbitJWT(r.Context(), req.CubbitToken)
+	accountID, email, err := verifyCubbitJWT(r.Context(), req.CubbitToken)
 	if err != nil {
 		slog.Warn("cubbit JWT verification failed", "err", err)
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	sessionToken, err := h.store.CreateSession(accountID)
+	isAdmin := h.adminEmail != "" && email == h.adminEmail
+	sessionToken, err := h.store.CreateSession(accountID, isAdmin)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	slog.Info("session created", "account_id", accountID)
+	slog.Info("session created", "account_id", accountID, "email", email, "is_admin", isAdmin)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	json.NewEncoder(w).Encode(map[string]any{
 		"session_token": sessionToken,
 		"account_id":    accountID,
+		"is_admin":      isAdmin,
 	})
 }
 
@@ -91,36 +95,43 @@ func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// verifyCubbitJWT calls the Cubbit /account/me endpoint to confirm the JWT is
-// valid, then extracts the account_id from the payload without trusting it
-// blindly (Cubbit already validated the signature).
-func verifyCubbitJWT(ctx context.Context, token string) (string, error) {
+// verifyCubbitJWT calls the Cubbit /accounts/me endpoint to confirm the JWT is
+// valid. It returns the account_id (sub claim) and the email from the API response.
+func verifyCubbitJWT(ctx context.Context, token string) (accountID, email string, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		cubbitAPIBase+"/iam/v1/accounts/me", nil)
 	if err != nil {
-		return "", fmt.Errorf("build request: %w", err)
+		return "", "", fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Cubbit API unreachable: %w", err)
+		return "", "", fmt.Errorf("Cubbit API unreachable: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Cubbit rejected token (HTTP %d)", resp.StatusCode)
+		return "", "", fmt.Errorf("Cubbit rejected token (HTTP %d)", resp.StatusCode)
+	}
+
+	// Parse the response body to extract the email.
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", "", fmt.Errorf("parse Cubbit response: %w", err)
 	}
 
 	// JWT signature is valid (Cubbit just confirmed). Extract sub from payload.
-	accountID := jwtSub(token)
+	accountID = jwtSub(token)
 	if accountID == "" {
-		return "", fmt.Errorf("token has no sub claim")
+		return "", "", fmt.Errorf("token has no sub claim")
 	}
-	return accountID, nil
+	return accountID, body.Email, nil
 }
 
 // jwtSub decodes the JWT payload and returns the "sub" claim without verifying
@@ -408,6 +419,79 @@ func (h *Handler) GetLiveLog(w http.ResponseWriter, r *http.Request) {
 	lines := livelog.Get(issueNum)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(lines)
+}
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+type adminRunRecord struct {
+	ID          string  `json:"id"`
+	AccountID   string  `json:"account_id"`
+	Repo        string  `json:"repo"`
+	IssueNumber int     `json:"issue_number"`
+	IssueTitle  string  `json:"issue_title"`
+	Status      string  `json:"status"`
+	StartedAt   int64   `json:"started_at"`
+	FinishedAt  *int64  `json:"finished_at,omitempty"`
+	DurationSec *int64  `json:"duration_sec,omitempty"`
+	ErrorMsg    string  `json:"error,omitempty"`
+	PRURL       string  `json:"pr_url,omitempty"`
+}
+
+func toAdminRunRecord(r store.RunRow) adminRunRecord {
+	rec := adminRunRecord{
+		ID:          r.ID,
+		AccountID:   r.AccountID,
+		Repo:        r.Repo,
+		IssueNumber: r.IssueNumber,
+		IssueTitle:  r.IssueTitle,
+		Status:      r.Status,
+		StartedAt:   r.StartedAt,
+		FinishedAt:  r.FinishedAt,
+		ErrorMsg:    r.ErrorMsg,
+		PRURL:       r.PRURL,
+	}
+	if r.FinishedAt != nil {
+		d := *r.FinishedAt - r.StartedAt
+		rec.DurationSec = &d
+	}
+	return rec
+}
+
+// AdminGetRuns returns the 200 most recent runs across all users.
+func (h *Handler) AdminGetRuns(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.store.ListAllRuns(200)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := make([]adminRunRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, toAdminRunRecord(row))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
+}
+
+// AdminGetUsers returns per-user run statistics.
+func (h *Handler) AdminGetUsers(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.store.GetUserStats()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+// AdminGetStats returns aggregated counters across all users.
+func (h *Handler) AdminGetStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.store.GetAdminStats()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

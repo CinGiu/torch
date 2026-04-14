@@ -150,6 +150,9 @@ const api = {
   triggerIssue: (body) => apiFetch("/api/pipeline/trigger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json()),
   getLiveLog:   (issue) => apiFetch(`/api/live-log?issue=${issue}`).then(r => r.json()),
   listRepos:    () => apiFetch("/api/repos").then(r => r.json()),
+  adminStats:   () => apiFetch("/api/admin/stats").then(r => r.json()),
+  adminUsers:   () => apiFetch("/api/admin/users").then(r => r.json()),
+  adminRuns:    () => apiFetch("/api/admin/runs").then(r => r.json()),
 };
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -1404,10 +1407,152 @@ function RepoPicker({ onSelect }) {
   );
 }
 
+// ─── Admin panel ─────────────────────────────────────────────────────────────
+
+function AdminPanel() {
+  const [stats, setStats]   = useState(null);
+  const [users, setUsers]   = useState(null);
+  const [runs,  setRuns]    = useState(null);
+  const [filter, setFilter] = useState(""); // filter runs by account_id prefix
+
+  const load = useCallback(async () => {
+    const [s, u, r] = await Promise.all([api.adminStats(), api.adminUsers(), api.adminRuns()]);
+    setStats(s);
+    setUsers(u ?? []);
+    setRuns(r ?? []);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const fmtDuration = (secs) => {
+    if (secs == null) return "—";
+    if (secs < 60)  return `${secs}s`;
+    return `${Math.floor(secs / 60)}m${secs % 60}s`;
+  };
+
+  const fmtTime = (ts) => ts ? new Date(ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+
+  const shortID = (id) => id ? id.slice(0, 8) + "…" : "—";
+
+  const filteredRuns = filter
+    ? (runs ?? []).filter(r => r.account_id.startsWith(filter))
+    : (runs ?? []);
+
+  const statusColor = { completed: colors.green, failed: colors.red, running: colors.orange };
+
+  return (
+    <div>
+      {/* Stats bar */}
+      {stats && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 12, marginBottom: 28 }}>
+          {[
+            ["Users",     stats.total_users, colors.cyan],
+            ["Total Runs",stats.total_runs,  colors.text],
+            ["Today",     stats.runs_today,  colors.cyan],
+            ["Completed", stats.completed,   colors.green],
+            ["Failed",    stats.failed,      colors.red],
+            ["Running",   stats.running,     colors.orange],
+          ].map(([label, val, color]) => (
+            <StatCard key={label} label={label} value={val ?? 0} color={color} />
+          ))}
+        </div>
+      )}
+
+      {/* Users table */}
+      <div style={{ marginBottom: 28 }}>
+        <p style={{ margin: "0 0 12px", fontSize: 12, color: colors.muted, fontFamily: mono, letterSpacing: "0.1em", textTransform: "uppercase" }}>Users</p>
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: mono, fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                {["Account ID", "Total", "Completed", "Failed", "Last Run"].map(h => (
+                  <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, color: colors.muted, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(users ?? []).length === 0 && (
+                <tr><td colSpan={5} style={{ padding: "20px 16px", color: colors.dim, textAlign: "center" }}>No users yet</td></tr>
+              )}
+              {(users ?? []).map(u => (
+                <tr key={u.account_id} style={{ borderBottom: `1px solid ${colors.border}22`, cursor: "pointer" }}
+                  onClick={() => setFilter(f => f === u.account_id ? "" : u.account_id)}>
+                  <td style={{ padding: "10px 16px", color: filter === u.account_id ? colors.cyan : colors.text }}>{shortID(u.account_id)}</td>
+                  <td style={{ padding: "10px 16px", color: colors.text }}>{u.total}</td>
+                  <td style={{ padding: "10px 16px", color: colors.green }}>{u.completed}</td>
+                  <td style={{ padding: "10px 16px", color: u.failed > 0 ? colors.red : colors.muted }}>{u.failed}</td>
+                  <td style={{ padding: "10px 16px", color: colors.muted }}>{fmtTime(u.last_run_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {filter && (
+          <p style={{ margin: "6px 0 0", fontSize: 12, color: colors.cyan, fontFamily: mono }}>
+            Filtering by {shortID(filter)} — <button onClick={() => setFilter("")} style={{ background: "none", border: "none", color: colors.cyan, cursor: "pointer", fontFamily: mono, fontSize: 12, textDecoration: "underline", padding: 0 }}>clear</button>
+          </p>
+        )}
+      </div>
+
+      {/* Runs table */}
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <p style={{ margin: 0, fontSize: 12, color: colors.muted, fontFamily: mono, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            Run History {filter ? `· ${shortID(filter)}` : "(all users)"}
+          </p>
+          <button onClick={load} style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 4, color: colors.muted, cursor: "pointer", padding: "3px 10px", fontSize: 12, fontFamily: mono }}>
+            refresh
+          </button>
+        </div>
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: mono, fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                {["User", "Repo", "Issue", "Status", "Duration", "When", "PR / Error"].map(h => (
+                  <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 11, color: colors.muted, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRuns.length === 0 && (
+                <tr><td colSpan={7} style={{ padding: "20px 14px", color: colors.dim, textAlign: "center" }}>No runs</td></tr>
+              )}
+              {filteredRuns.map(run => {
+                const col = statusColor[run.status] ?? colors.muted;
+                return (
+                  <tr key={run.id} style={{ borderBottom: `1px solid ${colors.border}11` }}>
+                    <td style={{ padding: "9px 14px", color: colors.muted }}>{shortID(run.account_id)}</td>
+                    <td style={{ padding: "9px 14px", color: colors.text, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{run.repo}</td>
+                    <td style={{ padding: "9px 14px", color: colors.muted }}>#{run.issue_number}</td>
+                    <td style={{ padding: "9px 14px" }}>
+                      <span style={{ color: col, fontSize: 11, padding: "2px 8px", borderRadius: 4, background: `${col}18`, border: `1px solid ${col}44` }}>{run.status}</span>
+                    </td>
+                    <td style={{ padding: "9px 14px", color: colors.muted }}>{fmtDuration(run.duration_sec)}</td>
+                    <td style={{ padding: "9px 14px", color: colors.dim, whiteSpace: "nowrap" }}>{fmtTime(run.started_at)}</td>
+                    <td style={{ padding: "9px 14px", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {run.pr_url
+                        ? <a href={run.pr_url} target="_blank" rel="noreferrer" style={{ color: colors.green, textDecoration: "none" }}>view PR</a>
+                        : run.error
+                          ? <span style={{ color: colors.red }} title={run.error}>{run.error.slice(0, 60)}</span>
+                          : <span style={{ color: colors.dim }}>—</span>
+                      }
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onLogout, auth, onReset }) {
   const [dashTab, setDashTab] = useState("monitor");
+  const isAdmin = !!auth?.is_admin;
   const setAgent    = (role) => (val) => setConfig(c => ({ ...c, agents: { ...c.agents, [role]: val } }));
   const setGithub   = (key)  => (val) => setConfig(c => ({ ...c, github:   { ...c.github,   [key]: val } }));
   const setPipeline = (key)  => (val) => setConfig(c => ({ ...c, pipeline: { ...c.pipeline, [key]: val } }));
@@ -1461,7 +1606,7 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
 
         {/* Tabs */}
         <div style={{ display: "flex", borderBottom: `1px solid ${colors.border}`, marginBottom: 24, overflowX: "auto" }}>
-          {[["monitor", "Monitor"], ["terminal", "Terminal"], ["issues", "Issues"], ["settings", "Settings"]].map(([id, label]) => (
+          {[["monitor", "Monitor"], ["terminal", "Terminal"], ["issues", "Issues"], ["settings", "Settings"], ...(isAdmin ? [["admin", "Admin"]] : [])].map(([id, label]) => (
             <button key={id} onClick={() => setDashTab(id)} style={{
               padding: "10px 22px", background: "none", border: "none",
               borderBottom: `2px solid ${dashTab === id ? colors.cyan : "transparent"}`,
@@ -1581,6 +1726,9 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
             </div>
           </div>
         )}
+
+        {/* Admin tab */}
+        {dashTab === "admin" && isAdmin && <AdminPanel />}
 
         <p style={{ margin: 0, fontSize: 12, color: colors.dim, fontFamily: mono, textAlign: "center" }}>
           refreshing every 5s · webhook: <span style={{ color: colors.dim }}>{window.location.origin}/webhook/github/{auth?.sub ?? "…"}</span>
@@ -1793,12 +1941,13 @@ export default function App() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || "Session creation failed");
       }
-      ({ session_token: sessionToken, account_id: accountId } = await res.json());
+      let isAdmin = false;
+      ({ session_token: sessionToken, account_id: accountId, is_admin: isAdmin } = await res.json());
     } catch (err) {
       setLoadError(err.message);
       return;
     }
-    const newAuth = saveAuth(sessionToken, accountId);
+    const newAuth = saveAuth(sessionToken, accountId, isAdmin);
     setAuth(newAuth);
     setLoadError(null);
     setLoading(true);
