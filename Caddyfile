@@ -1,0 +1,3 @@
+torch.tuodominio.com {
+    reverse_proxy torch:8080
+}
