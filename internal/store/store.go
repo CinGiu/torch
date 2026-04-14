@@ -42,8 +42,7 @@ func (s *Store) migrate() error {
 		CREATE TABLE IF NOT EXISTS sessions (
 			id         TEXT PRIMARY KEY,
 			account_id TEXT NOT NULL,
-			expires_at INTEGER NOT NULL,
-			is_admin   INTEGER NOT NULL DEFAULT 0
+			expires_at INTEGER NOT NULL
 		);
 		CREATE TABLE IF NOT EXISTS runs (
 			id           TEXT PRIMARY KEY,
@@ -60,7 +59,14 @@ func (s *Store) migrate() error {
 		CREATE INDEX IF NOT EXISTS runs_account_id ON runs(account_id);
 		CREATE INDEX IF NOT EXISTS runs_started_at  ON runs(started_at);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	// Additive column migrations — safe to re-run on an existing DB.
+	// SQLite returns an error if the column already exists; we ignore it.
+	s.db.Exec(`ALTER TABLE sessions ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0`)      //nolint
+	s.db.Exec(`ALTER TABLE user_configs ADD COLUMN email TEXT NOT NULL DEFAULT ''`)       //nolint
+	return nil
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
@@ -124,6 +130,19 @@ func (s *Store) DeleteSession(token string) error {
 	return err
 }
 
+// SaveEmail persists the email address for an account (upsert, email-only update).
+// Called at login so the email is always up to date even if the user never saves config.
+func (s *Store) SaveEmail(accountID, email string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`
+		INSERT INTO user_configs (account_id, email, config_json, updated_at)
+		VALUES (?, ?, '{}', datetime('now'))
+		ON CONFLICT(account_id) DO UPDATE SET email = excluded.email`,
+		accountID, email)
+	return err
+}
+
 // GetConfig returns the stored config for accountID, or a default config if
 // no record exists yet.
 func (s *Store) GetConfig(accountID string) (config.Config, error) {
@@ -182,11 +201,12 @@ type RunRow struct {
 }
 
 type UserStat struct {
-	AccountID string
-	Total     int
-	Completed int
-	Failed    int
-	LastRunAt *int64
+	AccountID string `json:"account_id"`
+	Email     string `json:"email"`
+	Total     int    `json:"total"`
+	Completed int    `json:"completed"`
+	Failed    int    `json:"failed"`
+	LastRunAt *int64 `json:"last_run_at"`
 }
 
 type AdminStats struct {
@@ -252,36 +272,58 @@ func (s *Store) ListAllRuns(limit int) ([]RunRow, error) {
 }
 
 // GetAdminStats returns aggregated run counters across all users.
+// TotalUsers counts distinct accounts from sessions+user_configs (not just runs).
 func (s *Store) GetAdminStats() (AdminStats, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var st AdminStats
 	dayAgo := time.Now().Add(-24 * time.Hour).Unix()
+
+	// Count known users from sessions and user_configs, not just from runs.
+	if err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM (
+			SELECT account_id FROM sessions
+			UNION
+			SELECT account_id FROM user_configs
+		)`).Scan(&st.TotalUsers); err != nil {
+		return st, err
+	}
+
 	err := s.db.QueryRow(`
 		SELECT
-			COUNT(DISTINCT account_id),
 			COUNT(*),
-			SUM(CASE WHEN started_at >= ? THEN 1 ELSE 0 END),
-			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END),
-			SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END),
-			SUM(CASE WHEN status = 'running'   THEN 1 ELSE 0 END)
+			COALESCE(SUM(CASE WHEN started_at >= ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = 'running'   THEN 1 ELSE 0 END), 0)
 		FROM runs`, dayAgo).Scan(
-		&st.TotalUsers, &st.TotalRuns, &st.RunsToday,
+		&st.TotalRuns, &st.RunsToday,
 		&st.Completed, &st.Failed, &st.Running)
 	return st, err
 }
 
-// GetUserStats returns per-account run summaries (admin).
+// GetUserStats returns per-account summaries for all known users (admin).
+// Includes users who have logged in or saved config, even with zero runs.
 func (s *Store) GetUserStats() ([]UserStat, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query(`
-		SELECT account_id,
-		       COUNT(*),
-		       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END),
-		       SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END),
-		       MAX(started_at)
-		FROM runs GROUP BY account_id ORDER BY MAX(started_at) DESC`)
+		SELECT
+			a.account_id,
+			COALESCE(uc.email, ''),
+			COALESCE(COUNT(r.id), 0),
+			COALESCE(SUM(CASE WHEN r.status = 'completed' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN r.status = 'failed'    THEN 1 ELSE 0 END), 0),
+			MAX(r.started_at)
+		FROM (
+			SELECT account_id FROM sessions
+			UNION
+			SELECT account_id FROM user_configs
+		) a
+		LEFT JOIN user_configs uc ON uc.account_id = a.account_id
+		LEFT JOIN runs r ON r.account_id = a.account_id
+		GROUP BY a.account_id
+		ORDER BY MAX(r.started_at) DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +331,7 @@ func (s *Store) GetUserStats() ([]UserStat, error) {
 	var out []UserStat
 	for rows.Next() {
 		var u UserStat
-		if err := rows.Scan(&u.AccountID, &u.Total, &u.Completed, &u.Failed, &u.LastRunAt); err != nil {
+		if err := rows.Scan(&u.AccountID, &u.Email, &u.Total, &u.Completed, &u.Failed, &u.LastRunAt); err != nil {
 			continue
 		}
 		out = append(out, u)

@@ -29,18 +29,20 @@ type contextKey string
 const ContextAccountID contextKey = "account_id"
 
 type Handler struct {
-	store      *store.Store
-	inspector  *asynq.Inspector
-	dispatcher *worker.Dispatcher
-	adminEmail string
+	store         *store.Store
+	inspector     *asynq.Inspector
+	dispatcher    *worker.Dispatcher
+	adminEmail    string
+	allowedDomain string // only emails from this domain can log in; empty = allow all
 }
 
-func NewHandler(st *store.Store, redisAddr string, dispatcher *worker.Dispatcher, adminEmail string) *Handler {
+func NewHandler(st *store.Store, redisAddr string, dispatcher *worker.Dispatcher, adminEmail, allowedDomain string) *Handler {
 	return &Handler{
-		store:      st,
-		inspector:  asynq.NewInspector(asynq.RedisClientOpt{Addr: redisAddr}),
-		dispatcher: dispatcher,
-		adminEmail: adminEmail,
+		store:         st,
+		inspector:     asynq.NewInspector(asynq.RedisClientOpt{Addr: redisAddr}),
+		dispatcher:    dispatcher,
+		adminEmail:    adminEmail,
+		allowedDomain: allowedDomain,
 	}
 }
 
@@ -70,11 +72,21 @@ func (h *Handler) ExchangeSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce domain allowlist if configured.
+	if h.allowedDomain != "" && !strings.HasSuffix(email, "@"+h.allowedDomain) {
+		slog.Warn("login rejected: email not in allowed domain", "email", email, "allowed", h.allowedDomain)
+		writeError(w, http.StatusForbidden, "account not allowed")
+		return
+	}
+
 	isAdmin := h.adminEmail != "" && email == h.adminEmail
 	sessionToken, err := h.store.CreateSession(accountID, isAdmin)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if email != "" {
+		h.store.SaveEmail(accountID, email) //nolint
 	}
 
 	slog.Info("session created", "account_id", accountID, "email", email, "is_admin", isAdmin)
@@ -118,40 +130,63 @@ func verifyCubbitJWT(ctx context.Context, token string) (accountID, email string
 		return "", "", fmt.Errorf("Cubbit rejected token (HTTP %d)", resp.StatusCode)
 	}
 
-	// Parse the response body to extract the email.
-	var body struct {
-		Email string `json:"email"`
+	// Read the API response body — Cubbit returns account info here.
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	slog.Debug("cubbit /accounts/me response", "body", string(bodyBytes))
+
+	// Extract email from Cubbit response: emails[] array, pick the default one.
+	var apiResp struct {
+		Emails []struct {
+			Email   string `json:"email"`
+			Default bool   `json:"default"`
+		} `json:"emails"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", "", fmt.Errorf("parse Cubbit response: %w", err)
+	if err := json.Unmarshal(bodyBytes, &apiResp); err == nil {
+		for _, e := range apiResp.Emails {
+			if e.Default && e.Email != "" {
+				email = e.Email
+				break
+			}
+		}
+		// Fallback: first entry if none is marked default.
+		if email == "" && len(apiResp.Emails) > 0 {
+			email = apiResp.Emails[0].Email
+		}
 	}
 
-	// JWT signature is valid (Cubbit just confirmed). Extract sub from payload.
-	accountID = jwtSub(token)
+	accountID, _ = jwtClaims(token)
 	if accountID == "" {
 		return "", "", fmt.Errorf("token has no sub claim")
 	}
-	return accountID, body.Email, nil
+	slog.Debug("identity resolved", "sub", accountID, "email", email)
+	return accountID, email, nil
 }
 
-// jwtSub decodes the JWT payload and returns the "sub" claim without verifying
-// the signature (used only after Cubbit has already validated the token).
-func jwtSub(tokenStr string) string {
+// jwtClaims decodes the JWT payload and returns the "sub" and "email" claims
+// without verifying the signature (safe: called only after Cubbit validated the token).
+// Falls back to "preferred_username" if "email" is absent.
+func jwtClaims(tokenStr string) (sub, email string) {
 	parts := strings.Split(tokenStr, ".")
 	if len(parts) != 3 {
-		return ""
+		return "", ""
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	var claims struct {
-		Sub string `json:"sub"`
+		Sub               string `json:"sub"`
+		Email             string `json:"email"`
+		PreferredUsername string `json:"preferred_username"`
 	}
 	if err := json.Unmarshal(decoded, &claims); err != nil {
-		return ""
+		return "", ""
 	}
-	return claims.Sub
+	email = claims.Email
+	if email == "" {
+		email = claims.PreferredUsername
+	}
+	return claims.Sub, email
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────

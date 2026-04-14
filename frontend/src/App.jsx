@@ -2,6 +2,52 @@ import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react
 import { loadAuthWithoutExpiry, saveAuth, clearAuth } from "./session.js";
 import "@xterm/xterm/css/xterm.css";
 
+// ─── Toast notification system ────────────────────────────────────────────────
+
+let _toastPush = null; // set by ToastProvider, callable from anywhere
+
+export function toast(msg, type = "error") {
+  if (_toastPush) _toastPush(msg, type);
+  else console.error("[toast]", msg);
+}
+
+function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([]);
+
+  useEffect(() => {
+    _toastPush = (msg, type) => {
+      const id = Date.now() + Math.random();
+      setToasts(t => [...t.slice(-4), { id, msg: String(msg), type }]);
+      setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 6000);
+    };
+    return () => { _toastPush = null; };
+  }, []);
+
+  return (
+    <>
+      {children}
+      <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 99999, display: "flex", flexDirection: "column", gap: 8, maxWidth: 420 }}>
+        {toasts.map(t => (
+          <div key={t.id} onClick={() => setToasts(ts => ts.filter(x => x.id !== t.id))} style={{
+            background: t.type === "error" ? "#1a0a0a" : "#0a1a0a",
+            border: `1px solid ${t.type === "error" ? "#f87171" : "#6ee7b7"}`,
+            borderLeft: `4px solid ${t.type === "error" ? "#f87171" : "#6ee7b7"}`,
+            borderRadius: 8, padding: "12px 16px", cursor: "pointer",
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 13,
+            color: t.type === "error" ? "#f87171" : "#6ee7b7",
+            boxShadow: "0 4px 24px #00000080",
+            animation: "slideIn 0.15s ease",
+          }}>
+            <span style={{ opacity: 0.6, marginRight: 8 }}>{t.type === "error" ? "✗" : "✓"}</span>
+            {t.msg}
+          </div>
+        ))}
+      </div>
+      <style>{`@keyframes slideIn { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) } }`}</style>
+    </>
+  );
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_PROMPTS = {
@@ -392,7 +438,7 @@ function SetupWizard({ config, setConfig, onLaunch, launching, onLogout, auth })
 
   const saveAndNext = async () => {
     setSaving(true);
-    try { await api.saveConfig(config); } catch {}
+    try { await api.saveConfig(config); } catch (e) { toast(e?.message ?? "Save failed"); }
     setSaving(false);
     setStep(s => s + 1);
   };
@@ -665,13 +711,13 @@ function IssuesPanel({ triggerLabel, pipelineActive, config, setConfig }) {
     if (!r || savedRepos.includes(r)) return;
     const updated = { ...config, github: { ...config.github, repos: [...savedRepos, r] } };
     setConfig(updated);
-    await api.saveConfig(updated).catch(() => {});
+    await api.saveConfig(updated).catch(e => toast(e?.message ?? "Save failed"));
   };
 
   const removeRepo = async (r) => {
     const updated = { ...config, github: { ...config.github, repos: savedRepos.filter(x => x !== r) } };
     setConfig(updated);
-    await api.saveConfig(updated).catch(() => {});
+    await api.saveConfig(updated).catch(e => toast(e?.message ?? "Save failed"));
     if (repo === r) { setRepo(""); setIssues(null); }
   };
 
@@ -848,12 +894,12 @@ function ExtraEnvEditor({ value, onChange }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <div>
           <label style={{ fontSize: 12, letterSpacing: "0.1em", color: colors.muted, textTransform: "uppercase", fontFamily: mono }}>Agent Environment</label>
-          <p style={{ margin: "3px 0 0", fontSize: 11, color: colors.dim, fontFamily: mono }}>Injected into every agent process. For PATH, the value is prepended to the existing PATH.</p>
+          <p style={{ margin: "3px 0 0", fontSize: 11, color: colors.dim, fontFamily: mono }}>Injected into every agent process. Use <span style={{ color: colors.cyan }}>PATH</span> to expose SDK binaries mounted from the host (Flutter, Go, Python…).</p>
         </div>
         <button onClick={add} style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 4, color: colors.muted, cursor: "pointer", padding: "3px 10px", fontSize: 12, fontFamily: mono, flexShrink: 0 }}>+ add</button>
       </div>
       {entries.length === 0 && (
-        <p style={{ fontSize: 12, color: colors.dim, fontFamily: mono, margin: 0 }}>e.g. <span style={{ color: colors.cyan }}>PATH</span> → <span style={{ color: colors.text }}>/opt/flutter/bin:/opt/android-sdk/cmdline-tools/latest/bin</span></p>
+        <p style={{ fontSize: 12, color: colors.dim, fontFamily: mono, margin: 0 }}>e.g. <span style={{ color: colors.cyan }}>PATH</span> → <span style={{ color: colors.text }}>/opt/flutter/bin</span> · <span style={{ color: colors.text }}>/usr/local/go/bin</span> · <span style={{ color: colors.text }}>/root/.pyenv/shims</span></p>
       )}
       {entries.map(([k, v]) => (
         <div key={k} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
@@ -903,7 +949,7 @@ function LiveLogPanel({ runs }) {
     clearInterval(pollRef.current);
     if (!issue) return;
     setLines([]);
-    const fetch_ = () => api.getLiveLog(issue).then(setLines).catch(() => {});
+    const fetch_ = () => api.getLiveLog(issue).then(setLines).catch(e => toast(e?.message ?? "Live log fetch failed"));
     fetch_();
     pollRef.current = setInterval(fetch_, 1000);
     return () => clearInterval(pollRef.current);
@@ -1413,13 +1459,21 @@ function AdminPanel() {
   const [stats, setStats]   = useState(null);
   const [users, setUsers]   = useState(null);
   const [runs,  setRuns]    = useState(null);
-  const [filter, setFilter] = useState(""); // filter runs by account_id prefix
+  const [filter, setFilter] = useState("");
+  const [err,   setErr]     = useState(null);
 
   const load = useCallback(async () => {
-    const [s, u, r] = await Promise.all([api.adminStats(), api.adminUsers(), api.adminRuns()]);
-    setStats(s);
-    setUsers(u ?? []);
-    setRuns(r ?? []);
+    setErr(null);
+    try {
+      const [s, u, r] = await Promise.all([api.adminStats(), api.adminUsers(), api.adminRuns()]);
+      setStats(s);
+      setUsers(u ?? []);
+      setRuns(r ?? []);
+    } catch (e) {
+      const msg = e?.message ?? "Failed to load admin data";
+      setErr(msg);
+      toast(msg);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -1442,6 +1496,12 @@ function AdminPanel() {
 
   return (
     <div>
+      {err && (
+        <div style={{ padding: "12px 16px", background: `${colors.red}11`, border: `1px solid ${colors.red}44`, borderRadius: 8, marginBottom: 20, fontFamily: mono, fontSize: 13, color: colors.red }}>
+          ✗ {err}
+        </div>
+      )}
+
       {/* Stats bar */}
       {stats && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 12, marginBottom: 28 }}>
@@ -1465,7 +1525,7 @@ function AdminPanel() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: mono, fontSize: 13 }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
-                {["Account ID", "Total", "Completed", "Failed", "Last Run"].map(h => (
+                {["Email", "Total", "Completed", "Failed", "Last Run"].map(h => (
                   <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, color: colors.muted, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>{h}</th>
                 ))}
               </tr>
@@ -1477,7 +1537,7 @@ function AdminPanel() {
               {(users ?? []).map(u => (
                 <tr key={u.account_id} style={{ borderBottom: `1px solid ${colors.border}22`, cursor: "pointer" }}
                   onClick={() => setFilter(f => f === u.account_id ? "" : u.account_id)}>
-                  <td style={{ padding: "10px 16px", color: filter === u.account_id ? colors.cyan : colors.text }}>{shortID(u.account_id)}</td>
+                  <td style={{ padding: "10px 16px", color: filter === u.account_id ? colors.cyan : colors.text }}>{u.email || shortID(u.account_id)}</td>
                   <td style={{ padding: "10px 16px", color: colors.text }}>{u.total}</td>
                   <td style={{ padding: "10px 16px", color: colors.green }}>{u.completed}</td>
                   <td style={{ padding: "10px 16px", color: u.failed > 0 ? colors.red : colors.muted }}>{u.failed}</td>
@@ -1565,7 +1625,9 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
       await api.saveConfig(config);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
-    } catch {}
+    } catch (e) {
+      toast(e?.message ?? "Save failed");
+    }
     setSaving(false);
   };
 
@@ -1930,7 +1992,7 @@ export default function App() {
       setLoadError("Invalid Cubbit token received");
       return;
     }
-    let sessionToken, accountId;
+    let sessionToken, accountId, isAdmin = false;
     try {
       const res = await fetch("/api/session", {
         method: "POST",
@@ -1941,7 +2003,6 @@ export default function App() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || "Session creation failed");
       }
-      let isAdmin = false;
       ({ session_token: sessionToken, account_id: accountId, is_admin: isAdmin } = await res.json());
     } catch (err) {
       setLoadError(err.message);
@@ -1978,7 +2039,7 @@ export default function App() {
   useEffect(() => {
     if (status?.active) {
       pollRef.current = setInterval(() => {
-        api.getStatus().then(setStatus).catch(() => {});
+        api.getStatus().then(setStatus).catch(e => toast(e?.message ?? "Status poll failed"));
       }, 5000);
     }
     return () => clearInterval(pollRef.current);
@@ -1992,37 +2053,50 @@ export default function App() {
       const st = await api.getStatus();
       setStatus(st);
       setIsConfigured(true); // wizard complete — move to Dashboard
-    } catch {}
+    } catch (e) {
+      toast(e?.message ?? "Launch failed");
+    }
     setLaunching(false);
   };
 
   const handleStop = async () => {
-    await api.stop();
-    const st = await api.getStatus();
-    setStatus(st);
+    try {
+      await api.stop();
+      const st = await api.getStatus();
+      setStatus(st);
+    } catch (e) {
+      toast(e?.message ?? "Stop failed");
+    }
   };
 
   if (loading) return (
-    <div style={{ minHeight: "100vh", background: colors.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <p style={{ color: colors.muted, fontFamily: mono, fontSize: 15 }}>loading...</p>
-    </div>
+    <ToastProvider>
+      <div style={{ minHeight: "100vh", background: colors.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <p style={{ color: colors.muted, fontFamily: mono, fontSize: 15 }}>loading...</p>
+      </div>
+    </ToastProvider>
   );
 
-  if (!auth) return <LoginPage onLogin={handleLogin} />;
+  if (!auth) return <ToastProvider><LoginPage onLogin={handleLogin} /></ToastProvider>;
 
   if (loadError) return (
-    <div style={{ minHeight: "100vh", background: colors.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ textAlign: "center" }}>
-        <p style={{ color: colors.red,  fontFamily: mono, fontSize: 15 }}>Cannot reach backend</p>
-        <p style={{ color: colors.muted, fontFamily: mono, fontSize: 13 }}>{loadError}</p>
-        <Btn style={{ marginTop: 12 }} onClick={() => window.location.reload()}>retry</Btn>
+    <ToastProvider>
+      <div style={{ minHeight: "100vh", background: colors.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ textAlign: "center" }}>
+          <p style={{ color: colors.red,  fontFamily: mono, fontSize: 15 }}>Cannot reach backend</p>
+          <p style={{ color: colors.muted, fontFamily: mono, fontSize: 13 }}>{loadError}</p>
+          <Btn style={{ marginTop: 12 }} onClick={() => window.location.reload()}>retry</Btn>
+        </div>
       </div>
-    </div>
+    </ToastProvider>
   );
 
-  if (status && isConfigured) {
-    return <Dashboard config={config} setConfig={setConfig} onStop={handleStop} onLaunch={handleLaunch} launching={launching} status={status} onLogout={handleLogout} auth={auth} onReset={() => setIsConfigured(false)} />;
-  }
+  const inner = (() => {
+    if (status && isConfigured) {
+      return <Dashboard config={config} setConfig={setConfig} onStop={handleStop} onLaunch={handleLaunch} launching={launching} status={status} onLogout={handleLogout} auth={auth} onReset={() => setIsConfigured(false)} />;
+    }
+    return <SetupWizard config={config} setConfig={setConfig} onLaunch={handleLaunch} launching={launching} onLogout={handleLogout} auth={auth} />;
+  })();
 
-  return <SetupWizard config={config} setConfig={setConfig} onLaunch={handleLaunch} launching={launching} onLogout={handleLogout} auth={auth} />;
+  return <ToastProvider>{inner}</ToastProvider>;
 }

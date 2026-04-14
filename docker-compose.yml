@@ -9,12 +9,35 @@ services:
       - CONFIG_PATH=/data/config.json
       - KEEP_WORKSPACE=true
       - LOG_LEVEL=debug
-      - ADMIN_EMAIL=   # set to your Cubbit email to unlock the Admin tab
+      - ADMIN_EMAIL=giulio.cinelli@cubbit.io   # your Cubbit email — unlocks the Admin tab
+      - ALLOWED_DOMAIN=cubbit.io               # restrict login to this domain; leave empty to allow any Cubbit account
     volumes:
       - ./data:/data
       - ./workspaces:/workspaces
-      - flutter_pub_cache:/root/.pub-cache
       - ~/.claude:/root/.claude:ro
+
+      # ── SDK mounts ────────────────────────────────────────────────────────
+      # Mount any SDK from the host and expose it to agents via PATH.
+      # Configure PATH in the dashboard: Settings → Agent Environment → PATH.
+      #
+      # Flutter:
+      #   - ~/flutter:/opt/flutter
+      #   PATH entry: /opt/flutter/bin:/opt/flutter/bin/cache/dart-sdk/bin
+      #   Extra volume for pub cache (optional but speeds up runs):
+      #   - flutter_pub_cache:/root/.pub-cache
+      #
+      # Go:
+      #   - ~/go:/usr/local/go
+      #   PATH entry: /usr/local/go/bin
+      #
+      # Python (pyenv):
+      #   - ~/.pyenv:/root/.pyenv
+      #   PATH entry: /root/.pyenv/shims:/root/.pyenv/bin
+      #
+      # Node (custom version):
+      #   - ~/.nvm:/root/.nvm
+      #   PATH entry: /root/.nvm/versions/node/v22.0.0/bin
+
     depends_on:
       redis:
         condition: service_healthy
@@ -33,4 +56,4 @@ services:
 
 volumes:
   redis_data:
-  flutter_pub_cache:
+  # flutter_pub_cache:   # uncomment if using Flutter

@@ -28,7 +28,9 @@ RUN go mod tidy && \
 # node:20-slim is Debian-based (glibc) — required for opencode's Linux binary
 FROM node:20-slim
 
-# Runtime dependencies
+# Base tools available to all agents regardless of project type.
+# SDK-specific runtimes (Flutter, Python, Go, …) are mounted from the host
+# via volumes in docker-compose.yml and exposed to agents via PATH in Settings.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     git-lfs \
@@ -37,20 +39,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     xz-utils \
     ca-certificates \
-    libglu1-mesa \
+    ncurses-base \
+    ncurses-term \
     && git lfs install \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Install Flutter via git (works on both x64 and arm64) ────────────────────
-ARG FLUTTER_VERSION=3.29.3
-RUN git clone --depth 1 --branch ${FLUTTER_VERSION} \
-        https://github.com/flutter/flutter.git /opt/flutter && \
-    /opt/flutter/bin/flutter config --no-analytics && \
-    /opt/flutter/bin/flutter precache --no-android --no-ios --no-web
-
-ENV PATH="/opt/flutter/bin:/opt/flutter/bin/cache/dart-sdk/bin:$PATH"
-ENV FLUTTER_ROOT="/opt/flutter"
-ENV PUB_CACHE="/root/.pub-cache"
+ENV TERM=xterm-256color
 
 # ── Install Claude Code CLI ──────────────────────────────────────────────────
 RUN npm install -g @anthropic-ai/claude-code

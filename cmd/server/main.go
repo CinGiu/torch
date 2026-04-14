@@ -38,7 +38,8 @@ func main() {
 	dbPath         := getEnv("DB_PATH", "/data/torch.db")
 	workspacesDir  := getEnv("WORKSPACES_DIR", "/workspaces")
 	concurrency    := getEnvInt("CONCURRENCY", 4)
-	adminEmail := getEnv("ADMIN_EMAIL", "")
+	adminEmail     := getEnv("ADMIN_EMAIL", "")
+	allowedDomain  := getEnv("ALLOWED_DOMAIN", "")
 
 	// ── Store (SQLite, per-user configs) ──────────
 	st, err := store.New(dbPath)
@@ -55,7 +56,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	dispatcher := worker.NewDispatcher(redisAddr)
-	apiHandler := api.NewHandler(st, redisAddr, dispatcher, adminEmail)
+	apiHandler := api.NewHandler(st, redisAddr, dispatcher, adminEmail, allowedDomain)
 
 	// Session exchange — no prior auth required
 	mux.HandleFunc("/api/session", func(w http.ResponseWriter, r *http.Request) {
