@@ -202,7 +202,7 @@ scp docker-compose.yml user@server:~/torch/
 ssh user@server "cd ~/torch && docker compose up -d"
 ```
 
-Put a reverse proxy (nginx, Caddy) or Cloudflare Tunnel in front of port 8080 for HTTPS and public webhook access.
+For HTTPS, put a reverse proxy in front of port 9094.
 
 ---
 
