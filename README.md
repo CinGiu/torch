@@ -198,11 +198,28 @@ Paste the full `opencode.json` in **Settings → Pipeline → Opencode Config**.
 ## Production deployment
 
 ```bash
-scp docker-compose.yml user@server:~/torch/
-ssh user@server "cd ~/torch && docker compose up -d"
+# Copy files to server
+scp docker-compose.yml Caddyfile user@server:~/torch/
+
+# On the server
+ssh user@server "cd ~/torch && docker compose up --build -d"
 ```
 
-For HTTPS, put a reverse proxy in front of port 9094.
+### HTTPS with Caddy (included)
+
+Torch ships with a `Caddyfile` that handles automatic HTTPS via Let's Encrypt:
+
+1. Add a DNS `A` record: `torch.yourdomain.com → <your-server-ip>`
+2. Edit `Caddyfile` and replace `torch.miodominio.io` with your domain
+3. Make sure ports **80** and **443** are open on the server firewall
+4. `docker compose up --build -d` — Caddy fetches and renews the certificate automatically
+
+```
+# Caddyfile
+torch.yourdomain.com {
+    reverse_proxy torch:8080
+}
+```
 
 ---
 
