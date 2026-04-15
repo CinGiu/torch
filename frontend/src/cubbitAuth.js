@@ -18,14 +18,9 @@ async function getChallenge(email) {
 }
 
 function signChallenge(challenge, password, salt) {
-  // SHA-256(password + salt) → 32-byte seed via @noble/hashes (pure JS, works without HTTPS)
   const seed = sha256(new TextEncoder().encode(password + salt));
-
-  // ED25519 sign via @noble/curves (pure JS)
   const challengeBytes = new TextEncoder().encode(challenge);
   const signature = ed25519.sign(challengeBytes, seed);
-
-  // Return as base64
   return btoa(String.fromCharCode(...signature));
 }
 
@@ -36,44 +31,50 @@ async function signIn(body) {
     body: JSON.stringify(body),
     credentials: 'include',
   });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({ message: 'Sign in failed' }));
-    throw new Error(err.message || 'Sign in failed');
+
+  if (response.status === 401) {
+    const err = await response.json().catch(() => ({}));
+    if (err.message === 'missing two factor code') {
+      throw Object.assign(new Error('needs_tfa'), { needsTFA: true });
+    }
+    throw new Error(humanizeAuthError(err.message));
   }
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(humanizeAuthError(err.message));
+  }
+
   return response.json();
 }
 
-async function verifyTFA(body) {
-  const response = await fetch(`${API_BASE}/v1/auth/verify/tfa`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    credentials: 'include',
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({ message: 'TFA verification failed' }));
-    throw new Error(err.message || 'TFA verification failed');
+function humanizeAuthError(msg) {
+  switch (msg) {
+    case 'unauthorized':              return 'Incorrect email or password.';
+    case 'invalid two factor code':
+    case 'invalid tfa code':          return 'Invalid verification code. Please try again.';
+    case 'account not found':         return 'No account found with this email.';
+    case 'account banned':            return 'This account has been suspended.';
+    default:                          return msg || 'Login failed. Please try again.';
   }
-  return response.json();
 }
 
-export async function login(email, password) {
+// Full sign-in flow. Pass tfaCode on the second attempt (after needsTFA).
+// Gets a fresh challenge every time — the previous challenge expires after the first 401.
+export async function login(email, password, tfaCode = null) {
   const { challenge, salt } = await getChallenge(email);
   const signedChallenge = signChallenge(challenge, password, salt);
 
-  const result = await signIn({
-    email,
-    signed_challenge: signedChallenge,
-    tfa_code: null,
-    tenant_id: DEFAULT_TENANT_ID,
-  });
-
-  if ('totp_session_id' in result) {
-    return { totpSessionId: result.totp_session_id };
+  try {
+    const result = await signIn({
+      email,
+      signed_challenge: signedChallenge,
+      tenant_id: DEFAULT_TENANT_ID,
+      ...(tfaCode ? { tfa_code: tfaCode } : {}),
+    });
+    return { token: result };
+  } catch (err) {
+    if (err.needsTFA) return { needsTFA: true };
+    throw err;
   }
-  return { token: result };
-}
-
-export async function verifyTFAAndLogin(totpSessionId, tfaCode) {
-  return verifyTFA({ totp_session_id: totpSessionId, tfa_code: tfaCode });
 }

@@ -199,6 +199,7 @@ const api = {
   adminStats:   () => apiFetch("/api/admin/stats").then(r => r.json()),
   adminUsers:   () => apiFetch("/api/admin/users").then(r => r.json()),
   adminRuns:    () => apiFetch("/api/admin/runs").then(r => r.json()),
+  sdks:         () => apiFetch("/api/sdks").then(r => r.json()),
 };
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -881,6 +882,103 @@ function IssuesPanel({ triggerLabel, pipelineActive, config, setConfig }) {
 }
 
 // ─── Extra env editor ─────────────────────────────────────────────────────────
+
+// ─── SDK panel ────────────────────────────────────────────────────────────────
+
+function SDKPanel({ extraEnv, onChange }) {
+  const [sdks, setSdks] = useState(null);
+
+  useEffect(() => {
+    api.sdks().then(setSdks).catch(() => {});
+  }, []);
+
+  if (!sdks) return null;
+
+  function isEnabled(sdk) {
+    const paths = (extraEnv?.PATH || "").split(":").filter(Boolean);
+    return sdk.path_entries.length > 0 && sdk.path_entries.every(p => paths.includes(p));
+  }
+
+  function toggle(sdk) {
+    const enabled = isEnabled(sdk);
+    let paths = (extraEnv?.PATH || "").split(":").filter(Boolean);
+    if (!enabled) {
+      for (const p of [...sdk.path_entries].reverse()) {
+        if (!paths.includes(p)) paths.unshift(p);
+      }
+    } else {
+      paths = paths.filter(p => !sdk.path_entries.includes(p));
+    }
+    const newEnv = { ...extraEnv };
+    if (paths.length > 0) newEnv.PATH = paths.join(":");
+    else delete newEnv.PATH;
+    onChange(newEnv);
+  }
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <label style={{ fontSize: 12, letterSpacing: "0.1em", color: colors.muted, textTransform: "uppercase", fontFamily: mono, display: "block", marginBottom: 4 }}>SDKs</label>
+      <p style={{ margin: "0 0 10px", fontSize: 11, color: colors.dim, fontFamily: mono }}>
+        Mount SDKs from the host in <span style={{ color: colors.cyan }}>docker-compose.yml</span>, then enable them to add their PATH to every agent.
+      </p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {sdks.map(sdk => {
+          const enabled = isEnabled(sdk);
+          return (
+            <div key={sdk.id} style={{
+              background: colors.input,
+              border: `1px solid ${enabled ? colors.cyan : colors.border}`,
+              borderRadius: 6,
+              padding: "10px 14px",
+              minWidth: 150,
+              opacity: sdk.available ? 1 : 0.5,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <span style={{ fontFamily: mono, fontSize: 12, color: colors.text, fontWeight: 600 }}>{sdk.name}</span>
+                <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4,
+                  background: sdk.available ? `${colors.green}22` : `${colors.muted}15`,
+                  color: sdk.available ? colors.green : colors.muted, fontFamily: mono, whiteSpace: "nowrap" }}>
+                  {sdk.available ? "mounted" : "not mounted"}
+                </span>
+              </div>
+              {sdk.available ? (
+                <p style={{ margin: 0, fontSize: 10, color: colors.dim, fontFamily: mono, wordBreak: "break-all", lineHeight: 1.5 }}>
+                  {sdk.path_entries.join("\n")}
+                </p>
+              ) : (
+                <p style={{ margin: 0, fontSize: 10, color: colors.dim, fontFamily: mono, lineHeight: 1.6 }}>
+                  Add to <span style={{ color: colors.cyan }}>volumes:</span><br />
+                  <span style={{ color: colors.text }}>- {sdk.mount_hint}</span>
+                </p>
+              )}
+              <button
+                disabled={!sdk.available}
+                onClick={() => toggle(sdk)}
+                style={{
+                  background: enabled ? colors.cyan : "transparent",
+                  border: `1px solid ${enabled ? colors.cyan : colors.border}`,
+                  borderRadius: 4,
+                  color: enabled ? colors.bg : colors.muted,
+                  cursor: sdk.available ? "pointer" : "not-allowed",
+                  padding: "3px 0",
+                  fontSize: 11,
+                  fontFamily: mono,
+                  width: "100%",
+                  marginTop: "auto",
+                }}
+              >
+                {enabled ? "✓ enabled" : "enable"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function ExtraEnvEditor({ value, onChange }) {
   const entries = Object.entries(value);
@@ -1759,6 +1857,7 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
                 <Field label="Workspaces Dir" value={config.pipeline.workspaces_dir} onChange={setPipeline("workspaces_dir")} placeholder="/workspaces" isCode />
                 <Field label="Test Command"   value={config.pipeline.test_command || ""} onChange={setPipeline("test_command")} placeholder="flutter test"    isCode hint="{test_command} in prompts" />
                 <Field label="Lint Command"   value={config.pipeline.lint_command || ""} onChange={setPipeline("lint_command")} placeholder="flutter analyze" isCode hint="{lint_command} in prompts" />
+                <SDKPanel extraEnv={config.pipeline.extra_env || {}} onChange={setPipeline("extra_env")} />
                 <ExtraEnvEditor value={config.pipeline.extra_env || {}} onChange={setPipeline("extra_env")} />
                 {Object.values(config.agents).some(a => a.cli === "opencode") && (
                   <Field label="Opencode Config (opencode.json)" value={config.pipeline.opencode_config || ""} onChange={setPipeline("opencode_config")} rows={10} isCode placeholder={'{\n  "provider": { ... },\n  "model": "vllm/vllm/mimir"\n}'} hint="Injected into each workspace. All 3 agents share the same file." />
@@ -1832,8 +1931,8 @@ function LoginPage({ onLogin }) {
     try {
       const { login } = await import("./cubbitAuth.js");
       const result = await login(email, password);
-      if (result.totpSessionId) {
-        setTotpSession(result.totpSessionId);
+      if (result.needsTFA) {
+        setTotpSession({ email, password });
       } else {
         onLogin(result.token);
       }
@@ -1846,13 +1945,17 @@ function LoginPage({ onLogin }) {
 
   const handleTFA = async (e) => {
     e.preventDefault();
-    if (!totpSession) return;
+    if (!totpSession) {
+      setError("Session expired — please log in again.");
+      setTotpSession(null);
+      return;
+    }
     setError(null);
     setIsLoading(true);
     try {
-      const { verifyTFAAndLogin } = await import("./cubbitAuth.js");
-      const token = await verifyTFAAndLogin(totpSession, tfaCode);
-      onLogin(token);
+      const { login } = await import("./cubbitAuth.js");
+      const result = await login(totpSession.email, totpSession.password, tfaCode);
+      onLogin(result.token);
     } catch (err) {
       setError(err.message || "TFA verification failed");
     } finally {

@@ -130,6 +130,13 @@ func main() {
 		}
 		apiHandler.GetLiveLog(w, r)
 	})
+	mux.HandleFunc("/api/sdks", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		apiHandler.GetSDKs(w, r)
+	})
 
 	// Admin routes — require both auth + matching ADMIN_ACCOUNT_ID
 	adminMux := http.NewServeMux()

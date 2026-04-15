@@ -17,26 +17,18 @@ services:
       - ~/.claude:/root/.claude
 
       # ── SDK mounts ────────────────────────────────────────────────────────
-      # Mount any SDK from the host and expose it to agents via PATH.
-      # Configure PATH in the dashboard: Settings → Agent Environment → PATH.
+      # To add an SDK: uncomment the volume below, restart the stack, then
+      # go to Settings → SDKs and enable the SDK with one click.
       #
-      # Flutter:
-      #   - ~/flutter:/opt/flutter
-      #   PATH entry: /opt/flutter/bin:/opt/flutter/bin/cache/dart-sdk/bin
-      #   Extra volume for pub cache (optional but speeds up runs):
-      #   - flutter_pub_cache:/root/.pub-cache
-      #
-      # Go:
-      #   - ~/go:/usr/local/go
-      #   PATH entry: /usr/local/go/bin
-      #
-      # Python (pyenv):
-      #   - ~/.pyenv:/root/.pyenv
-      #   PATH entry: /root/.pyenv/shims:/root/.pyenv/bin
-      #
-      # Node (custom version):
-      #   - ~/.nvm:/root/.nvm
-      #   PATH entry: /root/.nvm/versions/node/v22.0.0/bin
+      # Flutter:   - ~/flutter:/opt/flutter:ro
+      # Go:        - ~/go:/usr/local/go:ro
+      # Python:    - ~/.pyenv:/root/.pyenv:ro
+      # Rust:      - ~/.cargo:/root/.cargo:ro   # warning: exposes credentials.toml
+      #            - ~/.rustup:/root/.rustup:ro
+      # Ruby:      - ~/.rbenv:/root/.rbenv:ro
+      # Java:      - ~/.sdkman:/root/.sdkman:ro
+      # Node(nvm): - ~/.nvm:/root/.nvm:ro
+      #              (set PATH manually: /root/.nvm/versions/node/vX.Y.Z/bin)
 
     depends_on:
       redis:
