@@ -47,7 +47,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV TERM=xterm-256color
 
 # ── Install Claude Code CLI ──────────────────────────────────────────────────
-RUN npm install -g @anthropic-ai/claude-code
+RUN curl -fsSL https://claude.ai/install.sh | bash
 
 # ── Install opencode CLI (Linux binary via official installer) ────────────────
 RUN curl -fsSL https://opencode.ai/install | bash && \

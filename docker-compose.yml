@@ -14,7 +14,7 @@ services:
     volumes:
       - ./data:/data
       - ./workspaces:/workspaces
-      - ~/.claude:/root/.claude:ro
+      - ~/.claude:/root/.claude
 
       # ── SDK mounts ────────────────────────────────────────────────────────
       # Mount any SDK from the host and expose it to agents via PATH.
