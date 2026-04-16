@@ -192,6 +192,12 @@ func stripFileRefs(m map[string]interface{}) {
 			}
 		case map[string]interface{}:
 			stripFileRefs(val)
+		case []interface{}:
+			for _, item := range val {
+				if nested, ok := item.(map[string]interface{}); ok {
+					stripFileRefs(nested)
+				}
+			}
 		}
 	}
 }
