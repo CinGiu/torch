@@ -11,13 +11,24 @@ import (
 	"net/http"
 	"strings"
 
+	"torch/internal/config"
 	"torch/internal/store"
 	"torch/internal/worker"
 )
 
+// configStore is satisfied by *store.Store.
+type configStore interface {
+	GetConfig(accountID string) (config.Config, error)
+}
+
+// taskEnqueuer is satisfied by *worker.Dispatcher.
+type taskEnqueuer interface {
+	Enqueue(task worker.IssueTask) error
+}
+
 type Handler struct {
-	store      *store.Store
-	dispatcher *worker.Dispatcher
+	store      configStore
+	dispatcher taskEnqueuer
 }
 
 func NewHandler(st *store.Store, dispatcher *worker.Dispatcher) *Handler {
