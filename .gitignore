@@ -40,3 +40,6 @@ web/dist/
 stacks/
 cmd/server/main.go
 cmd/server/main.go
+
+# maestri app
+.maestri/
