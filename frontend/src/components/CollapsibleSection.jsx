@@ -20,7 +20,7 @@ export function CollapsibleSection({ icon, title, description, defaultOpen = fal
           background: 'transparent',
           border: 'none',
           borderBottom: isOpen ? `1px solid ${colors.border}` : 'none',
-          padding: `${spacing.xl} ${spacing.xl}`,
+          padding: `${spacing.lg} ${spacing.xl}`,
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
@@ -28,7 +28,7 @@ export function CollapsibleSection({ icon, title, description, defaultOpen = fal
           textAlign: 'left',
         }}
       >
-        <span style={{ fontSize: '20px' }}>{icon}</span>
+        <span style={{ fontSize: '20px', marginTop: '2px' }}>{icon}</span>
         <div style={{ flex: 1 }}>
           <h3 style={{
             margin: 0,
