@@ -3,6 +3,7 @@ import { loadAuthWithoutExpiry, saveAuth, clearAuth } from "./session.js";
 import { api } from "./api.js";
 import { loginSchema, tfaSchema } from "./validations.js";
 import { Panel, PanelHeader, PanelFooter, Section, InputGroup } from "./components/Panel.jsx";
+import { CollapsibleSection } from "./components/CollapsibleSection.jsx";
 import { Button } from "./components/Button.jsx";
 import { Input } from "./components/Input.jsx";
 import { typography, spacing } from "./design-tokens.js";
@@ -298,15 +299,18 @@ function AgentCard({ role, config, onChange }) {
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderTop: `2px solid ${meta.color}`, borderRadius: 10, padding: 22, position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 50, background: `radial-gradient(ellipse at 50% -20%, ${meta.color}18 0%, transparent 70%)`, pointerEvents: "none" }} />
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
           <span style={{ fontSize: 20 }}>{meta.icon}</span>
           <div>
-            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: colors.white, fontFamily: sans }}>{meta.label}</p>
+            <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: colors.white, fontFamily: sans }}>{meta.label}</p>
             <p style={{ margin: 0, fontSize: 12, color: colors.muted, fontFamily: mono }}>{meta.desc}</p>
           </div>
         </div>
-        <Toggle value={config.cli} onChange={handleCliChange} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <label style={{ fontSize: 11, letterSpacing: "0.08em", color: colors.textMuted, textTransform: "uppercase", fontFamily: mono }}>CLI</label>
+          <Toggle value={config.cli} onChange={handleCliChange} />
+        </div>
       </div>
       {config.cli === "claude" && (
         <>
@@ -1848,12 +1852,12 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
               </div>
             </Panel>
 
-            <Panel accent={colors.cyan} style={{ marginBottom: spacing.xl }}>
-              <PanelHeader 
-                icon="🔑" 
-                title="GitHub Integration" 
-                description="Connect to GitHub for automated PR creation"
-              />
+            <CollapsibleSection
+              icon="🔑"
+              title="GitHub Integration"
+              description="Connect to GitHub for automated PR creation"
+              defaultOpen={false}
+            >
               <Section title="Authentication">
                 <InputGroup>
                   <Input
@@ -1892,14 +1896,14 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
                   />
                 </InputGroup>
               </Section>
-            </Panel>
+            </CollapsibleSection>
 
-            <Panel accent={colors.green} style={{ marginBottom: spacing.xl }}>
-              <PanelHeader 
-                icon="⚙" 
-                title="Pipeline Settings" 
-                description="Configure build, test, and deployment options"
-              />
+            <CollapsibleSection
+              icon="⚙️"
+              title="Pipeline Settings"
+              description="Configure build, test, and deployment options"
+              defaultOpen={false}
+            >
               <Section title="Commands">
                 <InputGroup>
                   <Input
@@ -2005,7 +2009,7 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
                   </Button>
                 </div>
               </PanelFooter>
-            </Panel>
+            </CollapsibleSection>
           </div>
         )}
 

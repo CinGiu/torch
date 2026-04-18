@@ -3,9 +3,9 @@ import { colors, spacing, borders, typography } from '../design-tokens.js';
 export function Panel({ children, header, footer, accent, style }) {
   return (
     <div style={{
-      background: colors.surface,
-      border: borders.default,
-      borderTop: accent ? `2px solid ${accent}` : borders.top,
+      background: 'transparent',
+      border: 'none',
+      borderTop: 'none',
       borderRadius: borders.radius,
       overflow: 'hidden',
       ...style,
@@ -22,12 +22,13 @@ export function Panel({ children, header, footer, accent, style }) {
 export function PanelHeader({ icon, title, description }) {
   return (
     <div style={{
-      background: colors.bgSecondary,
-      padding: `${spacing.lg} ${spacing.xl}`,
-      borderBottom: borders.default,
+      background: 'transparent',
+      padding: `${spacing.md} ${spacing.xl}`,
+      borderBottom: `1px solid ${colors.border}`,
       display: 'flex',
       alignItems: 'center',
       gap: spacing.md,
+      marginBottom: spacing.lg,
     }}>
       {icon && <span style={{ fontSize: '20px' }}>{icon}</span>}
       <div>

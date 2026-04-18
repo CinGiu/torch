@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { colors, typography, borders, transitions } from '../design-tokens.js';
+import { colors, typography, borders, transitions, spacing } from '../design-tokens.js';
 
 export function Input({
   label,
