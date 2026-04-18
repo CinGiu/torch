@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
 import { loadAuthWithoutExpiry, saveAuth, clearAuth } from "./session.js";
+import { api } from "./api.js";
+import { loginSchema, tfaSchema } from "./validations.js";
+import { Panel, PanelHeader, PanelFooter, Section, InputGroup } from "./components/Panel.jsx";
+import { CollapsibleSection } from "./components/CollapsibleSection.jsx";
+import { Button } from "./components/Button.jsx";
+import { Input } from "./components/Input.jsx";
+import { typography, spacing } from "./design-tokens.js";
 import "@xterm/xterm/css/xterm.css";
 
 // ─── Toast notification system ────────────────────────────────────────────────
@@ -164,44 +171,6 @@ const emptyConfig = () => ({
   agents:   { developer: defaultAgent("developer"), tester: defaultAgent("tester"), reviewer: defaultAgent("reviewer") },
 });
 
-// ─── API ──────────────────────────────────────────────────────────────────────
-
-function authHeaders() {
-  try {
-    const stored = localStorage.getItem("torch_auth");
-    if (!stored) return {};
-    const { token } = JSON.parse(stored);
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  } catch { return {}; }
-}
-
-async function apiFetch(url, options = {}) {
-  const headers = { ...authHeaders(), ...(options.headers || {}) };
-  const res = await fetch(url, { ...options, headers });
-  if (res.status === 401) {
-    const err = new Error("unauthorized");
-    err.status = 401;
-    throw err;
-  }
-  return res;
-}
-
-const api = {
-  getConfig:    () => apiFetch("/api/config").then(r => r.json()),
-  saveConfig:   (cfg) => apiFetch("/api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) }).then(r => r.json()),
-  getStatus:    () => apiFetch("/api/status").then(r => r.json()),
-  start:        () => apiFetch("/api/pipeline/start",  { method: "POST" }).then(r => r.json()),
-  stop:         () => apiFetch("/api/pipeline/stop",   { method: "POST" }).then(r => r.json()),
-  listIssues:   (repo) => apiFetch(`/api/issues?repo=${encodeURIComponent(repo)}`).then(r => { if (!r.ok) return r.json().then(e => Promise.reject(e.error)); return r.json(); }),
-  triggerIssue: (body) => apiFetch("/api/pipeline/trigger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json()),
-  getLiveLog:   (issue) => apiFetch(`/api/live-log?issue=${issue}`).then(r => r.json()),
-  listRepos:    () => apiFetch("/api/repos").then(r => r.json()),
-  adminStats:   () => apiFetch("/api/admin/stats").then(r => r.json()),
-  adminUsers:   () => apiFetch("/api/admin/users").then(r => r.json()),
-  adminRuns:    () => apiFetch("/api/admin/runs").then(r => r.json()),
-  sdks:         () => apiFetch("/api/sdks").then(r => r.json()),
-};
-
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
 const mono = "'JetBrains Mono', monospace";
@@ -330,15 +299,18 @@ function AgentCard({ role, config, onChange }) {
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderTop: `2px solid ${meta.color}`, borderRadius: 10, padding: 22, position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 50, background: `radial-gradient(ellipse at 50% -20%, ${meta.color}18 0%, transparent 70%)`, pointerEvents: "none" }} />
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 20 }}>{meta.icon}</span>
-          <div>
-            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: colors.white, fontFamily: sans }}>{meta.label}</p>
-            <p style={{ margin: 0, fontSize: 12, color: colors.muted, fontFamily: mono }}>{meta.desc}</p>
+      <div style={{ marginBottom: 18, minHeight: 72 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
+          <span style={{ fontSize: 20, flexShrink: 0 }}>{meta.icon}</span>
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: colors.white, fontFamily: sans, lineHeight: 1.3 }}>{meta.label}</p>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: colors.textMuted, fontFamily: mono, lineHeight: 1.4, minHeight: 32 }}>{meta.desc}</p>
           </div>
         </div>
-        <Toggle value={config.cli} onChange={handleCliChange} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${colors.border}`, paddingTop: 12 }}>
+          <label style={{ fontSize: 11, letterSpacing: "0.08em", color: colors.textMuted, textTransform: "uppercase", fontFamily: mono }}>CLI</label>
+          <Toggle value={config.cli} onChange={handleCliChange} />
+        </div>
       </div>
       {config.cli === "claude" && (
         <>
@@ -384,8 +356,8 @@ function AgentCard({ role, config, onChange }) {
             </div>
         }
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <div>
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ marginBottom: 14 }}>
           <label style={{ fontSize: 12, letterSpacing: "0.1em", color: colors.muted, textTransform: "uppercase", fontFamily: mono, display: "block", marginBottom: 8 }}>Max Fix Rounds</label>
           <div style={{ display: "flex", gap: 6 }}>
             {[1, 2, 3, 4, 5].map(n => <Pill key={n} n={n} active={config.max_fix_rounds === n} color={meta.color} onClick={n => set("max_fix_rounds", n)} />)}
@@ -909,7 +881,9 @@ function SDKPanel({ extraEnv, onChange }) {
   const [sdks, setSdks] = useState(null);
 
   useEffect(() => {
-    api.sdks().then(setSdks).catch(() => {});
+    api.sdks()
+      .then(setSdks)
+      .catch(err => console.error('[SDKPanel] Failed to load SDKs:', err));
   }, []);
 
   if (!sdks) return null;
@@ -1323,13 +1297,14 @@ function TerminalSession({ auth, repo, onDisconnect }) {
           if (res.status === 401) { termRef.current?.writeln("\x1b[31m[session expired — please log in again]\x1b[0m"); return; }
 
           const proto    = location.protocol === "https:" ? "wss:" : "ws:";
-          const repoParam = repo ? `&repo=${encodeURIComponent(repo)}` : "";
-          const ws = new WebSocket(`${proto}//${location.host}/ws/terminal?token=${encodeURIComponent(token)}${repoParam}`);
+          const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : "";
+          const ws = new WebSocket(`${proto}//${location.host}/ws/terminal${repoParam}`);
           wsRef.current = ws;
           ws.binaryType = "arraybuffer";
 
           ws.onopen = () => {
-            reconnectDelay = 1000; // reset backoff on success
+            reconnectDelay = 1000;
+            ws.send(JSON.stringify({ type: "auth", token }));
             const t = termRef.current;
             if (t) ws.send(JSON.stringify({ type: "resize", rows: t.rows, cols: t.cols }));
           };
@@ -1853,59 +1828,200 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
 
         {/* Settings tab */}
         {dashTab === "settings" && (
-          <div>
-            <p style={{ margin: "0 0 24px", fontSize: 13, color: colors.muted, fontFamily: mono }}>
-              Changes take effect on the next pipeline run. The webhook listener stays active.
-            </p>
+          <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+            <Panel accent={colors.orange} style={{ marginTop: spacing.lg, marginBottom: spacing.xl }}>
+              <PanelHeader 
+                icon="🤖" 
+                title="Agent Configuration" 
+                description="Configure AI agents for each pipeline role"
+              />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: spacing.lg, marginBottom: spacing.xl }}>
+                {["developer", "tester", "reviewer"].map(role => (
+                  <AgentCard key={role} role={role} config={config.agents[role] ?? defaultAgent(role)} onChange={setAgent(role)} />
+                ))}
+              </div>
+            </Panel>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 20 }}>
-              {["developer", "tester", "reviewer"].map(role => (
-                <AgentCard key={role} role={role} config={config.agents[role] ?? defaultAgent(role)} onChange={setAgent(role)} />
-              ))}
-            </div>
+            <CollapsibleSection
+              icon="🔑"
+              title="GitHub Integration"
+              description="Connect to GitHub for automated PR creation"
+              defaultOpen={false}
+              style={{ marginTop: spacing.xl }}
+            >
+              <Section title="Authentication">
+                <InputGroup>
+                  <Input
+                    label="Token"
+                    type="password"
+                    value={config.github.token}
+                    onChange={setGithub("token")}
+                    placeholder="ghp_..."
+                    isCode
+                  />
+                  <Input
+                    label="Webhook Secret"
+                    type="password"
+                    value={config.github.webhook_secret}
+                    onChange={setGithub("webhook_secret")}
+                    placeholder="your-secret"
+                    isCode
+                  />
+                </InputGroup>
+              </Section>
+              <Section title="Repository Settings">
+                <InputGroup>
+                  <Input
+                    label="Trigger Label"
+                    value={config.github.trigger_label}
+                    onChange={setGithub("trigger_label")}
+                    placeholder="ai-implement"
+                    isCode
+                  />
+                  <Input
+                    label="Base Branch"
+                    value={config.github.base_branch}
+                    onChange={setGithub("base_branch")}
+                    placeholder="main"
+                    isCode
+                  />
+                </InputGroup>
+              </Section>
+            </CollapsibleSection>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
-              <Card>
-                <CardTitle icon="🔑">GitHub</CardTitle>
-                <Field label="Token"          value={config.github.token}          onChange={setGithub("token")}          type="password" placeholder="ghp_..." isCode />
-                <Field label="Webhook Secret" value={config.github.webhook_secret} onChange={setGithub("webhook_secret")} type="password" placeholder="your-secret" isCode />
-                <Field label="Trigger Label"  value={config.github.trigger_label}  onChange={setGithub("trigger_label")}  placeholder="ai-implement" isCode />
-                <Field label="Base Branch"    value={config.github.base_branch}    onChange={setGithub("base_branch")}    placeholder="main" isCode />
-              </Card>
-              <Card>
-                <CardTitle icon="⚙">Pipeline</CardTitle>
-                <Field label="Workspaces Dir" value={config.pipeline.workspaces_dir} onChange={setPipeline("workspaces_dir")} placeholder="/workspaces" isCode />
-                <Field label="Test Command"   value={config.pipeline.test_command || ""} onChange={setPipeline("test_command")} placeholder="flutter test"    isCode hint="{test_command} in prompts" />
-                <Field label="Lint Command"   value={config.pipeline.lint_command || ""} onChange={setPipeline("lint_command")} placeholder="flutter analyze" isCode hint="{lint_command} in prompts" />
-                <BoolField label="Keep workspace after pipeline" value={!!config.pipeline.keep_workspace} onChange={setPipeline("keep_workspace")} hint="If enabled, the git clone folder is not deleted after each run." />
+            <CollapsibleSection
+              icon="⚙️"
+              title="Pipeline Settings"
+              description="Configure build, test, and deployment options"
+              defaultOpen={false}
+              style={{ marginTop: spacing.xl }}
+            >
+              <Section title="Commands">
+                <InputGroup>
+                  <Input
+                    label="Test Command"
+                    value={config.pipeline.test_command || ""}
+                    onChange={setPipeline("test_command")}
+                    placeholder="flutter test"
+                    isCode
+                    hint="Used in agent prompts"
+                  />
+                  <Input
+                    label="Lint Command"
+                    value={config.pipeline.lint_command || ""}
+                    onChange={setPipeline("lint_command")}
+                    placeholder="flutter analyze"
+                    isCode
+                    hint="Used in agent prompts"
+                  />
+                </InputGroup>
+              </Section>
+              <Section title="Workspace">
+                <InputGroup>
+                  <Input
+                    label="Workspaces Directory"
+                    value={config.pipeline.workspaces_dir}
+                    onChange={setPipeline("workspaces_dir")}
+                    placeholder="/workspaces"
+                    isCode
+                  />
+                  <div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: spacing.md }}>
+                    <BoolField 
+                      label="Keep workspace after pipeline" 
+                      value={!!config.pipeline.keep_workspace} 
+                      onChange={setPipeline("keep_workspace")} 
+                      hint="If enabled, the git clone folder is not deleted after each run."
+                    />
+                  </div>
+                </InputGroup>
+              </Section>
+              <Section title="Advanced">
                 <SDKPanel extraEnv={config.pipeline.extra_env || {}} onChange={setPipeline("extra_env")} />
                 <ExtraEnvEditor value={config.pipeline.extra_env || {}} onChange={setPipeline("extra_env")} />
                 {Object.values(config.agents).some(a => a.cli === "opencode") && (
-                  <Field label="Opencode Config (opencode.json)" value={config.pipeline.opencode_config || ""} onChange={setPipeline("opencode_config")} rows={10} isCode placeholder={'{\n  "provider": { ... },\n  "model": "vllm/vllm/mimir"\n}'} hint="Injected into each workspace. All 3 agents share the same file." />
+                  <Input
+                    label="Opencode Config (opencode.json)"
+                    value={config.pipeline.opencode_config || ""}
+                    onChange={setPipeline("opencode_config")}
+                    rows={10}
+                    isCode
+                    placeholder={'{\n  "provider": { ... },\n  "model": "vllm/vllm/mimir"\n}'}
+                    hint="Injected into each workspace. All 3 agents share the same file."
+                  />
                 )}
-                <div>
-                  <label style={{ fontSize: 12, letterSpacing: "0.1em", color: colors.muted, textTransform: "uppercase", fontFamily: mono, display: "block", marginBottom: 8 }}>Max Fix Rounds</label>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    {[1, 2, 3, 4, 5].map(n => <Pill key={n} n={n} active={config.pipeline.max_fix_rounds === n} color={colors.white} onClick={n => setPipeline("max_fix_rounds")(n)} />)}
+                <div style={{ marginTop: spacing.lg }}>
+                  <label style={{ 
+                    fontSize: typography.label.fontSize, 
+                    fontWeight: typography.label.fontWeight,
+                    textTransform: typography.label.textTransform,
+                    letterSpacing: typography.label.letterSpacing,
+                    color: colors.textMuted, 
+                    fontFamily: typography.mono, 
+                    display: "block", 
+                    marginBottom: spacing.sm,
+                  }}>
+                    Max Fix Rounds
+                  </label>
+                  <div style={{ display: "flex", gap: spacing.sm }}>
+                    {[1, 2, 3, 4, 5].map(n => (
+                      <Pill 
+                        key={n} 
+                        n={n} 
+                        active={config.pipeline.max_fix_rounds === n} 
+                        color={colors.orange} 
+                        onClick={n => setPipeline("max_fix_rounds")(n)} 
+                      />
+                    ))}
                   </div>
                 </div>
-              </Card>
+              </Section>
+            </CollapsibleSection>
+
+            <div style={{
+              background: colors.bgSecondary,
+              border: `1px solid ${colors.border}`,
+              borderRadius: '4px',
+              padding: spacing.lg,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginTop: spacing.xl,
+            }}>
+              <Button 
+                variant="danger" 
+                onClick={async () => {
+                  if (!confirm("Reset all configuration? This will clear agents, GitHub token, and pipeline settings.")) return;
+                  const blank = emptyConfig();
+                  await api.saveConfig(blank);
+                  setConfig(blank);
+                  onReset();
+                }}
+              >
+                Reset to defaults
+              </Button>
+              <div style={{ display: 'flex', gap: spacing.md }}>
+                <Button variant="default" disabled={saving}>
+                  Cancel
+                </Button>
+                <Button 
+                  variant={saved ? "success" : "primary"} 
+                  onClick={saveSettings} 
+                  disabled={saving}
+                >
+                  {saving ? "Saving..." : saved ? "✓ Saved" : "Save Changes"}
+                </Button>
+              </div>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <Btn variant="danger" onClick={async () => {
-                if (!confirm("Reset all configuration? This will clear agents, GitHub token, and pipeline settings.")) return;
-                const blank = emptyConfig();
-                await api.saveConfig(blank);
-                setConfig(blank);
-                onReset();
-              }}>
-                Reset to defaults
-              </Btn>
-              <Btn variant={saved ? "primary" : "default"} onClick={saveSettings} disabled={saving}>
-                {saving ? "Saving..." : saved ? "✓ Saved" : "Save Changes"}
-              </Btn>
-            </div>
+            <p style={{ 
+              margin: `${spacing.lg} 0 0`, 
+              fontSize: typography.input.fontSize, 
+              color: colors.textMuted, 
+              fontFamily: typography.mono,
+              textAlign: 'center',
+            }}>
+              Changes take effect on the next pipeline run. The webhook listener stays active.
+            </p>
           </div>
         )}
 
@@ -1943,11 +2059,14 @@ function LoginPage({ onLogin }) {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!email.endsWith("@cubbit.io")) {
-      setError("Only Cubbiters can access");
+    setError(null);
+    
+    const validation = loginSchema.safeParse({ email, password });
+    if (!validation.success) {
+      setError(validation.error.errors[0].message);
       return;
     }
-    setError(null);
+    
     setIsLoading(true);
     try {
       const { login } = await import("./cubbitAuth.js");
@@ -1972,6 +2091,13 @@ function LoginPage({ onLogin }) {
       return;
     }
     setError(null);
+    
+    const validation = tfaSchema.safeParse({ tfaCode });
+    if (!validation.success) {
+      setError(validation.error.errors[0].message);
+      return;
+    }
+    
     setIsLoading(true);
     try {
       const { login } = await import("./cubbitAuth.js");
@@ -2093,13 +2219,19 @@ export default function App() {
   }, []);
 
   const handleLogout = useCallback(() => {
-    // Fire-and-forget: try to invalidate server-side session
     const stored = localStorage.getItem("torch_auth");
     if (stored) {
       try {
         const { token } = JSON.parse(stored);
-        if (token) fetch("/api/session", { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
-      } catch {}
+        if (token) {
+          fetch("/api/session", { 
+            method: "DELETE", 
+            headers: { Authorization: `Bearer ${token}` } 
+          }).catch(err => console.error('[Logout] Session invalidation failed:', err));
+        }
+      } catch (err) {
+        console.error('[Logout] Failed to parse stored auth:', err);
+      }
     }
     clearAuth();
     setAuth(null);
@@ -2222,5 +2354,11 @@ export default function App() {
     return <SetupWizard config={config} setConfig={setConfig} onLaunch={handleLaunch} launching={launching} onLogout={handleLogout} auth={auth} />;
   })();
 
-  return <ToastProvider>{inner}</ToastProvider>;
+  return (
+    <ToastProvider>
+      <main id="main-content" tabIndex="-1" style={{ minHeight: '100vh' }}>
+        {inner}
+      </main>
+    </ToastProvider>
+  );
 }
