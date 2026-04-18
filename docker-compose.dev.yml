@@ -1,0 +1,34 @@
+services:
+  torch:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_ADDR=redis:6379
+      - DB_PATH=/data/torch.db
+      - WORKSPACES_DIR=/workspaces
+      - KEEP_WORKSPACE=true
+      - LOG_LEVEL=debug
+    volumes:
+      - ./data:/data
+      - ./workspaces:/workspaces
+      - ~/.claude:/root/.claude
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis_data_dev:/data
+
+volumes:
+  redis_data_dev:
