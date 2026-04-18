@@ -356,8 +356,8 @@ function AgentCard({ role, config, onChange }) {
             </div>
         }
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <div>
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ marginBottom: 14 }}>
           <label style={{ fontSize: 12, letterSpacing: "0.1em", color: colors.muted, textTransform: "uppercase", fontFamily: mono, display: "block", marginBottom: 8 }}>Max Fix Rounds</label>
           <div style={{ display: "flex", gap: 6 }}>
             {[1, 2, 3, 4, 5].map(n => <Pill key={n} n={n} active={config.max_fix_rounds === n} color={meta.color} onClick={n => set("max_fix_rounds", n)} />)}
