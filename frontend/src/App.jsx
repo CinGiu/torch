@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
 import { loadAuthWithoutExpiry, saveAuth, clearAuth } from "./session.js";
+import { api } from "./api.js";
+import { loginSchema, tfaSchema } from "./validations.js";
 import "@xterm/xterm/css/xterm.css";
 
 // ─── Toast notification system ────────────────────────────────────────────────
@@ -163,44 +165,6 @@ const emptyConfig = () => ({
   github:   { token: "", webhook_secret: "", trigger_label: "ai-implement", base_branch: "main" },
   agents:   { developer: defaultAgent("developer"), tester: defaultAgent("tester"), reviewer: defaultAgent("reviewer") },
 });
-
-// ─── API ──────────────────────────────────────────────────────────────────────
-
-function authHeaders() {
-  try {
-    const stored = localStorage.getItem("torch_auth");
-    if (!stored) return {};
-    const { token } = JSON.parse(stored);
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  } catch { return {}; }
-}
-
-async function apiFetch(url, options = {}) {
-  const headers = { ...authHeaders(), ...(options.headers || {}) };
-  const res = await fetch(url, { ...options, headers });
-  if (res.status === 401) {
-    const err = new Error("unauthorized");
-    err.status = 401;
-    throw err;
-  }
-  return res;
-}
-
-const api = {
-  getConfig:    () => apiFetch("/api/config").then(r => r.json()),
-  saveConfig:   (cfg) => apiFetch("/api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) }).then(r => r.json()),
-  getStatus:    () => apiFetch("/api/status").then(r => r.json()),
-  start:        () => apiFetch("/api/pipeline/start",  { method: "POST" }).then(r => r.json()),
-  stop:         () => apiFetch("/api/pipeline/stop",   { method: "POST" }).then(r => r.json()),
-  listIssues:   (repo) => apiFetch(`/api/issues?repo=${encodeURIComponent(repo)}`).then(r => { if (!r.ok) return r.json().then(e => Promise.reject(e.error)); return r.json(); }),
-  triggerIssue: (body) => apiFetch("/api/pipeline/trigger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json()),
-  getLiveLog:   (issue) => apiFetch(`/api/live-log?issue=${issue}`).then(r => r.json()),
-  listRepos:    () => apiFetch("/api/repos").then(r => r.json()),
-  adminStats:   () => apiFetch("/api/admin/stats").then(r => r.json()),
-  adminUsers:   () => apiFetch("/api/admin/users").then(r => r.json()),
-  adminRuns:    () => apiFetch("/api/admin/runs").then(r => r.json()),
-  sdks:         () => apiFetch("/api/sdks").then(r => r.json()),
-};
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -909,7 +873,9 @@ function SDKPanel({ extraEnv, onChange }) {
   const [sdks, setSdks] = useState(null);
 
   useEffect(() => {
-    api.sdks().then(setSdks).catch(() => {});
+    api.sdks()
+      .then(setSdks)
+      .catch(err => console.error('[SDKPanel] Failed to load SDKs:', err));
   }, []);
 
   if (!sdks) return null;
@@ -1323,13 +1289,14 @@ function TerminalSession({ auth, repo, onDisconnect }) {
           if (res.status === 401) { termRef.current?.writeln("\x1b[31m[session expired — please log in again]\x1b[0m"); return; }
 
           const proto    = location.protocol === "https:" ? "wss:" : "ws:";
-          const repoParam = repo ? `&repo=${encodeURIComponent(repo)}` : "";
-          const ws = new WebSocket(`${proto}//${location.host}/ws/terminal?token=${encodeURIComponent(token)}${repoParam}`);
+          const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : "";
+          const ws = new WebSocket(`${proto}//${location.host}/ws/terminal${repoParam}`);
           wsRef.current = ws;
           ws.binaryType = "arraybuffer";
 
           ws.onopen = () => {
-            reconnectDelay = 1000; // reset backoff on success
+            reconnectDelay = 1000;
+            ws.send(JSON.stringify({ type: "auth", token }));
             const t = termRef.current;
             if (t) ws.send(JSON.stringify({ type: "resize", rows: t.rows, cols: t.cols }));
           };
@@ -1943,11 +1910,14 @@ function LoginPage({ onLogin }) {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!email.endsWith("@cubbit.io")) {
-      setError("Only Cubbiters can access");
+    setError(null);
+    
+    const validation = loginSchema.safeParse({ email, password });
+    if (!validation.success) {
+      setError(validation.error.errors[0].message);
       return;
     }
-    setError(null);
+    
     setIsLoading(true);
     try {
       const { login } = await import("./cubbitAuth.js");
@@ -1972,6 +1942,13 @@ function LoginPage({ onLogin }) {
       return;
     }
     setError(null);
+    
+    const validation = tfaSchema.safeParse({ tfaCode });
+    if (!validation.success) {
+      setError(validation.error.errors[0].message);
+      return;
+    }
+    
     setIsLoading(true);
     try {
       const { login } = await import("./cubbitAuth.js");
@@ -2093,13 +2070,19 @@ export default function App() {
   }, []);
 
   const handleLogout = useCallback(() => {
-    // Fire-and-forget: try to invalidate server-side session
     const stored = localStorage.getItem("torch_auth");
     if (stored) {
       try {
         const { token } = JSON.parse(stored);
-        if (token) fetch("/api/session", { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
-      } catch {}
+        if (token) {
+          fetch("/api/session", { 
+            method: "DELETE", 
+            headers: { Authorization: `Bearer ${token}` } 
+          }).catch(err => console.error('[Logout] Session invalidation failed:', err));
+        }
+      } catch (err) {
+        console.error('[Logout] Failed to parse stored auth:', err);
+      }
     }
     clearAuth();
     setAuth(null);
@@ -2222,5 +2205,11 @@ export default function App() {
     return <SetupWizard config={config} setConfig={setConfig} onLaunch={handleLaunch} launching={launching} onLogout={handleLogout} auth={auth} />;
   })();
 
-  return <ToastProvider>{inner}</ToastProvider>;
+  return (
+    <ToastProvider>
+      <main id="main-content" tabIndex="-1" style={{ minHeight: '100vh' }}>
+        {inner}
+      </main>
+    </ToastProvider>
+  );
 }

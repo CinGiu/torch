@@ -3,12 +3,33 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Torch - AI-powered development pipeline" />
     <title>Torch</title>
-    <style>*, *::before, *::after { box-sizing: border-box; } body, html { margin: 0; padding: 0; }</style>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; }
+      body, html { margin: 0; padding: 0; }
+      /* Skip link for keyboard navigation */
+      .skip-link {
+        position: absolute;
+        top: -40px;
+        left: 0;
+        background: #f59e0b;
+        color: #12100e;
+        padding: 8px 16px;
+        z-index: 100000;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .skip-link:focus {
+        top: 0;
+      }
+    </style>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   </head>
   <body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
