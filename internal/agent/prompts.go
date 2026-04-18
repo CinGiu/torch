@@ -17,6 +17,26 @@ func BuildDeveloperPrompt(systemPrompt string, ctx types.IssueContext, feedback,
 	var sb strings.Builder
 	sb.WriteString(applyCommands(systemPrompt, lintCmd, testCmd))
 	sb.WriteString(fmt.Sprintf("\n\n---\nIssue #%d: %s\n\n%s", ctx.IssueNumber, ctx.IssueTitle, ctx.IssueBody))
+	sb.WriteString(`
+
+## Git Management Rules
+
+**DO NOT MODIFY THESE FILES:**
+- opencode.json — pipeline configuration (injected automatically)
+- .torch_handoff.md — inter-agent communication file
+- mimir-key — API key file
+
+**Before finishing your work:**
+1. Review all changes with git status
+2. Stage ONLY relevant source code files: git add <files> (avoid git add .)
+3. Create a meaningful commit: git commit -m "feat: implement issue #N"
+4. DO NOT push — the pipeline will handle the final push
+
+**Files to NEVER commit:**
+- opencode.json, .torch_handoff.md, mimir-key
+- Test artifacts, build outputs, .DS_Store, node_modules, etc.
+
+If you accidentally modified opencode.json, restore it: git checkout opencode.json`)
 
 	if feedback != "" {
 		sb.WriteString(fmt.Sprintf(`
@@ -42,4 +62,3 @@ func BuildReviewerPrompt(systemPrompt string, ctx types.IssueContext, lintCmd, t
 	task := fmt.Sprintf("---\nIssue #%d: %s\n\nReview the implementation of this issue.", ctx.IssueNumber, ctx.IssueTitle)
 	return strings.TrimSpace(applyCommands(systemPrompt, lintCmd, testCmd) + "\n\n" + task)
 }
-

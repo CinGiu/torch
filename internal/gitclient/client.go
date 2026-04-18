@@ -33,17 +33,8 @@ func (c *Client) CreateBranch(workspace, branch string) error {
 	return c.run(workspace, "git", "checkout", "-b", branch)
 }
 
-func (c *Client) CommitAndPush(workspace, branch, message string) error {
-	// Stage everything, then explicitly unstage injected pipeline files
-	if err := c.run(workspace, "git", "add", "."); err != nil {
-		return err
-	}
-	// Unstage pipeline-injected files so they never appear in the PR
-	_ = c.run(workspace, "git", "restore", "--staged", "opencode.json")
-	_ = c.run(workspace, "git", "restore", "--staged", "mimir-key")
-	if err := c.run(workspace, "git", "commit", "--allow-empty", "-m", message); err != nil {
-		return err
-	}
+func (c *Client) Push(workspace, branch string) error {
+	// Agent has already committed, just push the branch
 	return c.run(workspace, "git", "push", "-u", "origin", branch)
 }
 

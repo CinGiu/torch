@@ -108,8 +108,8 @@ func (p *Processor) ProcessIssueTask(ctx context.Context, t *asynq.Task) (retErr
 		return fmt.Errorf("orchestrator: %w", err)
 	}
 
-	commitMsg := fmt.Sprintf("feat: implement issue #%d\n\n%s", task.IssueNumber, task.IssueTitle)
-	if err := gitClient.CommitAndPush(workspace, branchName, commitMsg); err != nil {
+	// Agent has already committed, just push
+	if err := gitClient.Push(workspace, branchName); err != nil {
 		sm.Transition(ctx, task.IssueNumber, githubclient.LabelFailed,
 			fmt.Sprintf("❌ **Push failed**\n```\n%s\n```", err))
 		return fmt.Errorf("push: %w", err)
