@@ -7,7 +7,7 @@ export function CollapsibleSection({ icon, title, description, defaultOpen = fal
   return (
     <div style={{ 
       marginBottom: spacing.xl,
-      background: colors.surface,
+      background: colors.bg,
       border: borders.default,
       borderRadius: '12px',
       overflow: 'hidden',
