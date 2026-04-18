@@ -1983,33 +1983,43 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
                   </div>
                 </div>
               </Section>
-              <PanelFooter>
-                <Button 
-                  variant="danger" 
-                  onClick={async () => {
-                    if (!confirm("Reset all configuration? This will clear agents, GitHub token, and pipeline settings.")) return;
-                    const blank = emptyConfig();
-                    await api.saveConfig(blank);
-                    setConfig(blank);
-                    onReset();
-                  }}
-                >
-                  Reset to defaults
-                </Button>
-                <div style={{ display: 'flex', gap: spacing.md }}>
-                  <Button variant="default" disabled={saving}>
-                    Cancel
-                  </Button>
-                  <Button 
-                    variant={saved ? "success" : "primary"} 
-                    onClick={saveSettings} 
-                    disabled={saving}
-                  >
-                    {saving ? "Saving..." : saved ? "✓ Saved" : "Save Changes"}
-                  </Button>
-                </div>
-              </PanelFooter>
             </CollapsibleSection>
+
+            <div style={{
+              background: colors.bgSecondary,
+              border: `1px solid ${colors.border}`,
+              borderRadius: '4px',
+              padding: spacing.lg,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginTop: spacing.xl,
+            }}>
+              <Button 
+                variant="danger" 
+                onClick={async () => {
+                  if (!confirm("Reset all configuration? This will clear agents, GitHub token, and pipeline settings.")) return;
+                  const blank = emptyConfig();
+                  await api.saveConfig(blank);
+                  setConfig(blank);
+                  onReset();
+                }}
+              >
+                Reset to defaults
+              </Button>
+              <div style={{ display: 'flex', gap: spacing.md }}>
+                <Button variant="default" disabled={saving}>
+                  Cancel
+                </Button>
+                <Button 
+                  variant={saved ? "success" : "primary"} 
+                  onClick={saveSettings} 
+                  disabled={saving}
+                >
+                  {saving ? "Saving..." : saved ? "✓ Saved" : "Save Changes"}
+                </Button>
+              </div>
+            </div>
           </div>
         )}
 
