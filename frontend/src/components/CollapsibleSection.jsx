@@ -20,7 +20,7 @@ export function CollapsibleSection({ icon, title, description, defaultOpen = fal
           background: 'transparent',
           border: 'none',
           borderBottom: isOpen ? `1px solid ${colors.border}` : 'none',
-          padding: `${spacing.lg} ${spacing.xl}`,
+          padding: `${spacing.xl} ${spacing.xl}`,
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
