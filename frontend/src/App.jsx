@@ -1847,6 +1847,7 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
               title="GitHub Integration"
               description="Connect to GitHub for automated PR creation"
               defaultOpen={false}
+              style={{ marginTop: spacing.xl }}
             >
               <Section title="Authentication">
                 <InputGroup>
@@ -1893,6 +1894,7 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
               title="Pipeline Settings"
               description="Configure build, test, and deployment options"
               defaultOpen={false}
+              style={{ marginTop: spacing.xl }}
             >
               <Section title="Commands">
                 <InputGroup>

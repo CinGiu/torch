@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { colors, spacing, typography, borders } from '../design-tokens.js';
 
-export function CollapsibleSection({ icon, title, description, defaultOpen = false, children }) {
+export function CollapsibleSection({ icon, title, description, defaultOpen = false, children, style }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
@@ -11,6 +11,7 @@ export function CollapsibleSection({ icon, title, description, defaultOpen = fal
       border: borders.default,
       borderRadius: '12px',
       overflow: 'hidden',
+      ...style,
     }}>
       <button
         onClick={() => setIsOpen(!isOpen)}
