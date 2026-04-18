@@ -1,3 +1,4 @@
+const IS_DEV = import.meta.env.DEV;
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
 function authHeaders() {
@@ -11,7 +12,7 @@ function authHeaders() {
 
 async function apiFetch(url, options = {}, timeout = 30000, retries = 2) {
   const headers = { ...authHeaders(), ...(options.headers || {}) };
-  const fullUrl = `${API_BASE}${url}`;
+  const fullUrl = IS_DEV ? url : `${API_BASE}${url}`;
   
   let lastError = null;
   
