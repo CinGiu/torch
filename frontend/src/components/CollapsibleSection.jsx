@@ -29,7 +29,7 @@ export function CollapsibleSection({ icon, title, description, defaultOpen = fal
         }}
       >
         <span style={{ fontSize: '20px', marginTop: '2px' }}>{icon}</span>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, marginTop: '2px' }}>
           <h3 style={{
             margin: 0,
             fontSize: '13px',
