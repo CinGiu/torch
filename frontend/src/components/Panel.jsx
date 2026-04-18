@@ -77,17 +77,34 @@ export function PanelFooter({ children, style }) {
 
 export function Section({ title, children, style }) {
   return (
-    <div style={{ marginBottom: spacing.xl, ...style }}>
+    <div style={{ 
+      marginBottom: spacing.xl, 
+      padding: spacing.lg,
+      background: colors.bg,
+      border: `1px solid ${colors.border}`,
+      borderRadius: borders.radius,
+      ...style 
+    }}>
       {title && (
         <h4 style={{
-          margin: `0 0 ${spacing.md}`,
-          fontSize: typography.label.fontSize,
-          fontWeight: typography.label.fontWeight,
-          textTransform: typography.label.textTransform,
-          letterSpacing: typography.label.letterSpacing,
-          color: colors.textMuted,
-          fontFamily: typography.mono,
+          margin: `0 0 ${spacing.lg}`,
+          fontSize: '12px',
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.1em',
+          color: colors.orange,
+          fontFamily: typography.sans,
+          display: 'flex',
+          alignItems: 'center',
+          gap: spacing.sm,
         }}>
+          <span style={{
+            display: 'inline-block',
+            width: 4,
+            height: 14,
+            background: colors.orange,
+            borderRadius: '2px',
+          }} />
           {title}
         </h4>
       )}
@@ -101,7 +118,7 @@ export function InputGroup({ children, style }) {
     <div style={{
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-      gap: spacing.lg,
+      gap: spacing.xl,
       ...style,
     }}>
       {children}

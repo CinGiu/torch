@@ -1,34 +1,43 @@
 import { useState } from 'react';
-import { colors, spacing, typography } from '../design-tokens.js';
+import { colors, spacing, typography, borders } from '../design-tokens.js';
 
 export function CollapsibleSection({ icon, title, description, defaultOpen = false, children }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
-    <div style={{ marginBottom: spacing.xl }}>
+    <div style={{ 
+      marginBottom: spacing.xl,
+      background: colors.surface,
+      border: borders.default,
+      borderRadius: borders.radiusLg,
+      overflow: 'hidden',
+    }}>
       <button
         onClick={() => setIsOpen(!isOpen)}
         style={{
           width: '100%',
-          background: 'transparent',
+          background: colors.bgSecondary,
           border: 'none',
-          borderBottom: `1px solid ${colors.border}`,
-          padding: `${spacing.md} ${spacing.xl}`,
+          borderBottom: isOpen ? `1px solid ${colors.border}` : 'none',
+          padding: `${spacing.lg} ${spacing.xl}`,
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           gap: spacing.md,
           textAlign: 'left',
+          transition: 'background 0.2s',
         }}
+        onMouseEnter={(e) => e.target.style.background = colors.surfaceDark}
+        onMouseLeave={(e) => e.target.style.background = colors.bgSecondary}
       >
         <span style={{ fontSize: '20px' }}>{icon}</span>
-        <div>
+        <div style={{ flex: 1 }}>
           <h3 style={{
             margin: 0,
-            fontSize: '14px',
+            fontSize: '13px',
             fontWeight: 700,
             textTransform: 'uppercase',
-            letterSpacing: '0.1em',
+            letterSpacing: '0.12em',
             color: colors.textHeader,
             fontFamily: typography.sans,
           }}>
@@ -47,9 +56,8 @@ export function CollapsibleSection({ icon, title, description, defaultOpen = fal
           )}
         </div>
         <span style={{
-          marginLeft: 'auto',
           fontSize: '16px',
-          color: colors.textMuted,
+          color: colors.orange,
           transition: 'transform 0.2s',
           transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
         }}>
