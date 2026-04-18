@@ -11,7 +11,7 @@ export function Panel({ children, header, footer, accent, style }) {
       ...style,
     }}>
       {header}
-      <div style={{ padding: spacing.lg }}>
+      <div style={{ padding: `${spacing.xl} ${spacing.xl}` }}>
         {children}
       </div>
       {footer}
@@ -22,21 +22,21 @@ export function Panel({ children, header, footer, accent, style }) {
 export function PanelHeader({ icon, title, description }) {
   return (
     <div style={{
-      background: colors.surfaceDark,
-      padding: `${spacing.md} ${spacing.lg}`,
+      background: colors.bgSecondary,
+      padding: `${spacing.lg} ${spacing.xl}`,
       borderBottom: borders.default,
       display: 'flex',
       alignItems: 'center',
       gap: spacing.md,
     }}>
-      {icon && <span style={{ fontSize: '18px' }}>{icon}</span>}
+      {icon && <span style={{ fontSize: '20px' }}>{icon}</span>}
       <div>
         <h3 style={{
           margin: 0,
-          fontSize: typography.header.fontSize,
-          fontWeight: typography.header.fontWeight,
-          textTransform: typography.header.textTransform,
-          letterSpacing: typography.header.letterSpacing,
+          fontSize: '14px',
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.1em',
           color: colors.textHeader,
           fontFamily: typography.sans,
         }}>
@@ -44,10 +44,11 @@ export function PanelHeader({ icon, title, description }) {
         </h3>
         {description && (
           <p style={{
-            margin: `${spacing.xs} 0 0`,
-            fontSize: typography.input.fontSize,
+            margin: `${spacing.xs} 0 0 0`,
+            fontSize: '12px',
             color: colors.textMuted,
             fontFamily: typography.mono,
+            lineHeight: 1.4,
           }}>
             {description}
           </p>
