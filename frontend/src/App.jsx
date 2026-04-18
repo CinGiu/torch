@@ -299,15 +299,15 @@ function AgentCard({ role, config, onChange }) {
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderTop: `2px solid ${meta.color}`, borderRadius: 10, padding: 22, position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 50, background: `radial-gradient(ellipse at 50% -20%, ${meta.color}18 0%, transparent 70%)`, pointerEvents: "none" }} />
-      <div style={{ marginBottom: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-          <span style={{ fontSize: 20 }}>{meta.icon}</span>
-          <div>
-            <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: colors.white, fontFamily: sans }}>{meta.label}</p>
-            <p style={{ margin: 0, fontSize: 12, color: colors.muted, fontFamily: mono }}>{meta.desc}</p>
+      <div style={{ marginBottom: 18, minHeight: 72 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
+          <span style={{ fontSize: 20, flexShrink: 0 }}>{meta.icon}</span>
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: colors.white, fontFamily: sans, lineHeight: 1.3 }}>{meta.label}</p>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: colors.textMuted, fontFamily: mono, lineHeight: 1.4, minHeight: 32 }}>{meta.desc}</p>
           </div>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${colors.border}`, paddingTop: 12 }}>
           <label style={{ fontSize: 11, letterSpacing: "0.08em", color: colors.textMuted, textTransform: "uppercase", fontFamily: mono }}>CLI</label>
           <Toggle value={config.cli} onChange={handleCliChange} />
         </div>
