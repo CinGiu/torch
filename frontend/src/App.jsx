@@ -1829,16 +1829,6 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
         {/* Settings tab */}
         {dashTab === "settings" && (
           <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-            <p style={{ 
-              margin: `0 0 ${spacing.xxl}`, 
-              fontSize: typography.input.fontSize, 
-              color: colors.textMuted, 
-              fontFamily: typography.mono,
-              textAlign: 'center',
-            }}>
-              Changes take effect on the next pipeline run. The webhook listener stays active.
-            </p>
-
             <Panel accent={colors.orange} style={{ marginBottom: spacing.xl }}>
               <PanelHeader 
                 icon="🤖" 
@@ -2020,6 +2010,16 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
                 </Button>
               </div>
             </div>
+
+            <p style={{ 
+              margin: `${spacing.lg} 0 0`, 
+              fontSize: typography.input.fontSize, 
+              color: colors.textMuted, 
+              fontFamily: typography.mono,
+              textAlign: 'center',
+            }}>
+              Changes take effect on the next pipeline run. The webhook listener stays active.
+            </p>
           </div>
         )}
 
