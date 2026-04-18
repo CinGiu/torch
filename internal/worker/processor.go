@@ -64,7 +64,7 @@ func (p *Processor) ProcessIssueTask(ctx context.Context, t *asynq.Task) (retErr
 	}
 	sm := githubclient.NewStatusManager(ghClient, owner, repo)
 
-	keepWorkspace := os.Getenv("KEEP_WORKSPACE") == "true"
+	keepWorkspace := cfg.Pipeline.KeepWorkspace || os.Getenv("KEEP_WORKSPACE") == "true"
 	defer func() {
 		if keepWorkspace {
 			log.Info("workspace kept for inspection", "path", workspace)

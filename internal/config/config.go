@@ -24,6 +24,7 @@ type PipelineConfig struct {
 	TestCommand    string            `json:"test_command"`
 	LintCommand    string            `json:"lint_command"`
 	Active         bool              `json:"active"`
+	KeepWorkspace  bool              `json:"keep_workspace,omitempty"`
 	OpencodeConfig string            `json:"opencode_config,omitempty"`
 	ExtraEnv       map[string]string `json:"extra_env,omitempty"` // injected into every agent process (e.g. PATH additions)
 }

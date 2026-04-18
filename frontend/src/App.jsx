@@ -257,6 +257,25 @@ function Toggle({ value, onChange }) {
   );
 }
 
+function BoolField({ label, value, onChange, hint }) {
+  return (
+    <div style={{ marginBottom: 16, display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }} onClick={() => onChange(!value)}>
+      <div style={{
+        marginTop: 2, width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+        border: `1px solid ${value ? colors.cyan : colors.border}`,
+        background: value ? `${colors.cyan}22` : colors.input,
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        {value && <span style={{ color: colors.cyan, fontSize: 11, lineHeight: 1 }}>✓</span>}
+      </div>
+      <div>
+        <span style={{ fontSize: 13, fontFamily: mono, color: value ? colors.text : colors.muted }}>{label}</span>
+        {hint && <p style={{ margin: "3px 0 0", fontSize: 12, color: colors.dim, fontFamily: mono }}>{hint}</p>}
+      </div>
+    </div>
+  );
+}
+
 function Pill({ n, active, color, onClick }) {
   return (
     <button onClick={() => onClick(n)} style={{
@@ -615,6 +634,7 @@ function SetupWizard({ config, setConfig, onLaunch, launching, onLogout, auth })
               <Field label="Trigger Label" value={config.github.trigger_label} onChange={setGithub("trigger_label")} placeholder="ai-implement" isCode />
               <Field label="Base Branch" value={config.github.base_branch} onChange={setGithub("base_branch")} placeholder="main" isCode />
               <Field label="Workspaces Dir" value={config.pipeline.workspaces_dir} onChange={setPipeline("workspaces_dir")} placeholder="/workspaces" isCode />
+              <BoolField label="Keep workspace after pipeline" value={!!config.pipeline.keep_workspace} onChange={setPipeline("keep_workspace")} hint="If enabled, the git clone folder is not deleted after each run." />
             </Card>
 
             <Card style={{ marginTop: 16 }}>
@@ -1857,6 +1877,7 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
                 <Field label="Workspaces Dir" value={config.pipeline.workspaces_dir} onChange={setPipeline("workspaces_dir")} placeholder="/workspaces" isCode />
                 <Field label="Test Command"   value={config.pipeline.test_command || ""} onChange={setPipeline("test_command")} placeholder="flutter test"    isCode hint="{test_command} in prompts" />
                 <Field label="Lint Command"   value={config.pipeline.lint_command || ""} onChange={setPipeline("lint_command")} placeholder="flutter analyze" isCode hint="{lint_command} in prompts" />
+                <BoolField label="Keep workspace after pipeline" value={!!config.pipeline.keep_workspace} onChange={setPipeline("keep_workspace")} hint="If enabled, the git clone folder is not deleted after each run." />
                 <SDKPanel extraEnv={config.pipeline.extra_env || {}} onChange={setPipeline("extra_env")} />
                 <ExtraEnvEditor value={config.pipeline.extra_env || {}} onChange={setPipeline("extra_env")} />
                 {Object.values(config.agents).some(a => a.cli === "opencode") && (
