@@ -82,7 +82,7 @@ export function Section({ title, children, style }) {
       padding: spacing.lg,
       background: colors.bg,
       border: `1px solid ${colors.border}`,
-      borderRadius: borders.radius,
+      borderRadius: '12px',
       ...style 
     }}>
       {title && (

@@ -9,14 +9,14 @@ export function CollapsibleSection({ icon, title, description, defaultOpen = fal
       marginBottom: spacing.xl,
       background: colors.surface,
       border: borders.default,
-      borderRadius: borders.radiusLg,
+      borderRadius: '12px',
       overflow: 'hidden',
     }}>
       <button
         onClick={() => setIsOpen(!isOpen)}
         style={{
           width: '100%',
-          background: colors.bgSecondary,
+          background: 'transparent',
           border: 'none',
           borderBottom: isOpen ? `1px solid ${colors.border}` : 'none',
           padding: `${spacing.lg} ${spacing.xl}`,
@@ -25,10 +25,7 @@ export function CollapsibleSection({ icon, title, description, defaultOpen = fal
           alignItems: 'center',
           gap: spacing.md,
           textAlign: 'left',
-          transition: 'background 0.2s',
         }}
-        onMouseEnter={(e) => e.target.style.background = colors.surfaceDark}
-        onMouseLeave={(e) => e.target.style.background = colors.bgSecondary}
       >
         <span style={{ fontSize: '20px' }}>{icon}</span>
         <div style={{ flex: 1 }}>
