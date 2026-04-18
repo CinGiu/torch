@@ -2,6 +2,10 @@ import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react
 import { loadAuthWithoutExpiry, saveAuth, clearAuth } from "./session.js";
 import { api } from "./api.js";
 import { loginSchema, tfaSchema } from "./validations.js";
+import { Panel, PanelHeader, PanelFooter, Section, InputGroup } from "./components/Panel.jsx";
+import { Button } from "./components/Button.jsx";
+import { Input } from "./components/Input.jsx";
+import { typography, spacing } from "./design-tokens.js";
 import "@xterm/xterm/css/xterm.css";
 
 // ─── Toast notification system ────────────────────────────────────────────────
@@ -1820,59 +1824,188 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
 
         {/* Settings tab */}
         {dashTab === "settings" && (
-          <div>
-            <p style={{ margin: "0 0 24px", fontSize: 13, color: colors.muted, fontFamily: mono }}>
+          <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+            <p style={{ 
+              margin: `0 0 ${spacing.xxl}`, 
+              fontSize: typography.input.fontSize, 
+              color: colors.textMuted, 
+              fontFamily: typography.mono,
+              textAlign: 'center',
+            }}>
               Changes take effect on the next pipeline run. The webhook listener stays active.
             </p>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 20 }}>
-              {["developer", "tester", "reviewer"].map(role => (
-                <AgentCard key={role} role={role} config={config.agents[role] ?? defaultAgent(role)} onChange={setAgent(role)} />
-              ))}
-            </div>
+            <Panel accent={colors.orange} style={{ marginBottom: spacing.xl }}>
+              <PanelHeader 
+                icon="🤖" 
+                title="Agent Configuration" 
+                description="Configure AI agents for each pipeline role"
+              />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: spacing.lg, marginBottom: spacing.lg }}>
+                {["developer", "tester", "reviewer"].map(role => (
+                  <AgentCard key={role} role={role} config={config.agents[role] ?? defaultAgent(role)} onChange={setAgent(role)} />
+                ))}
+              </div>
+            </Panel>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
-              <Card>
-                <CardTitle icon="🔑">GitHub</CardTitle>
-                <Field label="Token"          value={config.github.token}          onChange={setGithub("token")}          type="password" placeholder="ghp_..." isCode />
-                <Field label="Webhook Secret" value={config.github.webhook_secret} onChange={setGithub("webhook_secret")} type="password" placeholder="your-secret" isCode />
-                <Field label="Trigger Label"  value={config.github.trigger_label}  onChange={setGithub("trigger_label")}  placeholder="ai-implement" isCode />
-                <Field label="Base Branch"    value={config.github.base_branch}    onChange={setGithub("base_branch")}    placeholder="main" isCode />
-              </Card>
-              <Card>
-                <CardTitle icon="⚙">Pipeline</CardTitle>
-                <Field label="Workspaces Dir" value={config.pipeline.workspaces_dir} onChange={setPipeline("workspaces_dir")} placeholder="/workspaces" isCode />
-                <Field label="Test Command"   value={config.pipeline.test_command || ""} onChange={setPipeline("test_command")} placeholder="flutter test"    isCode hint="{test_command} in prompts" />
-                <Field label="Lint Command"   value={config.pipeline.lint_command || ""} onChange={setPipeline("lint_command")} placeholder="flutter analyze" isCode hint="{lint_command} in prompts" />
-                <BoolField label="Keep workspace after pipeline" value={!!config.pipeline.keep_workspace} onChange={setPipeline("keep_workspace")} hint="If enabled, the git clone folder is not deleted after each run." />
+            <Panel accent={colors.cyan} style={{ marginBottom: spacing.xl }}>
+              <PanelHeader 
+                icon="🔑" 
+                title="GitHub Integration" 
+                description="Connect to GitHub for automated PR creation"
+              />
+              <Section title="Authentication">
+                <InputGroup>
+                  <Input
+                    label="Token"
+                    type="password"
+                    value={config.github.token}
+                    onChange={setGithub("token")}
+                    placeholder="ghp_..."
+                    isCode
+                  />
+                  <Input
+                    label="Webhook Secret"
+                    type="password"
+                    value={config.github.webhook_secret}
+                    onChange={setGithub("webhook_secret")}
+                    placeholder="your-secret"
+                    isCode
+                  />
+                </InputGroup>
+              </Section>
+              <Section title="Repository Settings">
+                <InputGroup>
+                  <Input
+                    label="Trigger Label"
+                    value={config.github.trigger_label}
+                    onChange={setGithub("trigger_label")}
+                    placeholder="ai-implement"
+                    isCode
+                  />
+                  <Input
+                    label="Base Branch"
+                    value={config.github.base_branch}
+                    onChange={setGithub("base_branch")}
+                    placeholder="main"
+                    isCode
+                  />
+                </InputGroup>
+              </Section>
+            </Panel>
+
+            <Panel accent={colors.green} style={{ marginBottom: spacing.xl }}>
+              <PanelHeader 
+                icon="⚙" 
+                title="Pipeline Settings" 
+                description="Configure build, test, and deployment options"
+              />
+              <Section title="Commands">
+                <InputGroup>
+                  <Input
+                    label="Test Command"
+                    value={config.pipeline.test_command || ""}
+                    onChange={setPipeline("test_command")}
+                    placeholder="flutter test"
+                    isCode
+                    hint="Used in agent prompts"
+                  />
+                  <Input
+                    label="Lint Command"
+                    value={config.pipeline.lint_command || ""}
+                    onChange={setPipeline("lint_command")}
+                    placeholder="flutter analyze"
+                    isCode
+                    hint="Used in agent prompts"
+                  />
+                </InputGroup>
+              </Section>
+              <Section title="Workspace">
+                <InputGroup>
+                  <Input
+                    label="Workspaces Directory"
+                    value={config.pipeline.workspaces_dir}
+                    onChange={setPipeline("workspaces_dir")}
+                    placeholder="/workspaces"
+                    isCode
+                  />
+                  <div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: spacing.md }}>
+                    <BoolField 
+                      label="Keep workspace after pipeline" 
+                      value={!!config.pipeline.keep_workspace} 
+                      onChange={setPipeline("keep_workspace")} 
+                      hint="If enabled, the git clone folder is not deleted after each run."
+                    />
+                  </div>
+                </InputGroup>
+              </Section>
+              <Section title="Advanced">
                 <SDKPanel extraEnv={config.pipeline.extra_env || {}} onChange={setPipeline("extra_env")} />
                 <ExtraEnvEditor value={config.pipeline.extra_env || {}} onChange={setPipeline("extra_env")} />
                 {Object.values(config.agents).some(a => a.cli === "opencode") && (
-                  <Field label="Opencode Config (opencode.json)" value={config.pipeline.opencode_config || ""} onChange={setPipeline("opencode_config")} rows={10} isCode placeholder={'{\n  "provider": { ... },\n  "model": "vllm/vllm/mimir"\n}'} hint="Injected into each workspace. All 3 agents share the same file." />
+                  <Input
+                    label="Opencode Config (opencode.json)"
+                    value={config.pipeline.opencode_config || ""}
+                    onChange={setPipeline("opencode_config")}
+                    rows={10}
+                    isCode
+                    placeholder={'{\n  "provider": { ... },\n  "model": "vllm/vllm/mimir"\n}'}
+                    hint="Injected into each workspace. All 3 agents share the same file."
+                  />
                 )}
-                <div>
-                  <label style={{ fontSize: 12, letterSpacing: "0.1em", color: colors.muted, textTransform: "uppercase", fontFamily: mono, display: "block", marginBottom: 8 }}>Max Fix Rounds</label>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    {[1, 2, 3, 4, 5].map(n => <Pill key={n} n={n} active={config.pipeline.max_fix_rounds === n} color={colors.white} onClick={n => setPipeline("max_fix_rounds")(n)} />)}
+                <div style={{ marginTop: spacing.lg }}>
+                  <label style={{ 
+                    fontSize: typography.label.fontSize, 
+                    fontWeight: typography.label.fontWeight,
+                    textTransform: typography.label.textTransform,
+                    letterSpacing: typography.label.letterSpacing,
+                    color: colors.textMuted, 
+                    fontFamily: typography.mono, 
+                    display: "block", 
+                    marginBottom: spacing.sm,
+                  }}>
+                    Max Fix Rounds
+                  </label>
+                  <div style={{ display: "flex", gap: spacing.sm }}>
+                    {[1, 2, 3, 4, 5].map(n => (
+                      <Pill 
+                        key={n} 
+                        n={n} 
+                        active={config.pipeline.max_fix_rounds === n} 
+                        color={colors.orange} 
+                        onClick={n => setPipeline("max_fix_rounds")(n)} 
+                      />
+                    ))}
                   </div>
                 </div>
-              </Card>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <Btn variant="danger" onClick={async () => {
-                if (!confirm("Reset all configuration? This will clear agents, GitHub token, and pipeline settings.")) return;
-                const blank = emptyConfig();
-                await api.saveConfig(blank);
-                setConfig(blank);
-                onReset();
-              }}>
-                Reset to defaults
-              </Btn>
-              <Btn variant={saved ? "primary" : "default"} onClick={saveSettings} disabled={saving}>
-                {saving ? "Saving..." : saved ? "✓ Saved" : "Save Changes"}
-              </Btn>
-            </div>
+              </Section>
+              <PanelFooter>
+                <Button 
+                  variant="danger" 
+                  onClick={async () => {
+                    if (!confirm("Reset all configuration? This will clear agents, GitHub token, and pipeline settings.")) return;
+                    const blank = emptyConfig();
+                    await api.saveConfig(blank);
+                    setConfig(blank);
+                    onReset();
+                  }}
+                >
+                  Reset to defaults
+                </Button>
+                <div style={{ display: 'flex', gap: spacing.md }}>
+                  <Button variant="default" disabled={saving}>
+                    Cancel
+                  </Button>
+                  <Button 
+                    variant={saved ? "success" : "primary"} 
+                    onClick={saveSettings} 
+                    disabled={saving}
+                  >
+                    {saving ? "Saving..." : saved ? "✓ Saved" : "Save Changes"}
+                  </Button>
+                </div>
+              </PanelFooter>
+            </Panel>
           </div>
         )}
 
