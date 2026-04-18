@@ -1829,13 +1829,13 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
         {/* Settings tab */}
         {dashTab === "settings" && (
           <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-            <Panel accent={colors.orange} style={{ marginBottom: spacing.xl }}>
+            <Panel accent={colors.orange} style={{ marginTop: spacing.lg, marginBottom: spacing.xl }}>
               <PanelHeader 
                 icon="🤖" 
                 title="Agent Configuration" 
                 description="Configure AI agents for each pipeline role"
               />
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: spacing.lg, marginBottom: spacing.lg }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: spacing.lg, marginBottom: spacing.xl }}>
                 {["developer", "tester", "reviewer"].map(role => (
                   <AgentCard key={role} role={role} config={config.agents[role] ?? defaultAgent(role)} onChange={setAgent(role)} />
                 ))}
