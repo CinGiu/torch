@@ -238,7 +238,7 @@ func main() {
 
 	// ── HTTP server ───────────────────────────────
 	slog.Info("server listening", "addr", ":8080")
-	if err := http.ListenAndServe(":8080", loggingMiddleware(authMiddleware(st, mux))); err != nil {
+	if err := http.ListenAndServe(":8080", corsMiddleware(loggingMiddleware(authMiddleware(st, mux)))); err != nil {
 		slog.Error("server crashed", "err", err)
 		os.Exit(1)
 	}
@@ -288,6 +288,34 @@ func writeUnauthorized(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
 	w.Write([]byte(`{"error":"unauthorized"}`))
+}
+
+// corsMiddleware adds CORS headers so the API is reachable from browser
+// frontends served on a different origin (e.g. the Vite dev server or a
+// custom domain). The allowed origin is read from CORS_ORIGIN (default: *).
+func corsMiddleware(next http.Handler) http.Handler {
+	allowed := getEnv("CORS_ORIGIN", "*")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if allowed == "*" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", allowed)
+			w.Header().Set("Vary", "Origin")
+		}
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {

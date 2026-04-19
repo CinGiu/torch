@@ -4,9 +4,12 @@
 **/.claude/
 **/.claude.log
 
-# AI tools - Opencode
+# AI tools - Opencode (ignore user config in repo root, keep .opencode/ defaults)
 opencode.json
-**/opencode.json
+!opencode.json.example
+
+# AI tools - OhMyOpenCode (ignore user overrides, keep defaults)
+.opencode/
 
 # AI tools - Mimir
 mimir-key
