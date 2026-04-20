@@ -22,7 +22,9 @@ COPY web/     web/
 COPY --from=frontend-builder /app/frontend/dist/ web/dist/
 
 RUN go mod tidy && \
-    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /torch ./cmd/server
+    CGO_ENABLED=0 GOOS=linux go build \
+      -ldflags="-s -w -X main.buildTime=$(date -u +%Y%m%dT%H%M%SZ)" \
+      -o /torch ./cmd/server
 
 # ─── Stage 3: Final runtime image ────────────────────────────────────────────
 # node:20-slim is Debian-based (glibc) — required for opencode's Linux binary
@@ -52,6 +54,9 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 # ── Install opencode CLI (Linux binary via official installer) ────────────────
 RUN curl -fsSL https://opencode.ai/install | bash && \
     ln -s /root/.opencode/bin/opencode /usr/local/bin/opencode
+
+# ── Install OhMyOpenCode plugin (pre-configured, user-enabled) ───────────────
+RUN npm install -g oh-my-opencode
 
 # ── Copy torch binary ────────────────────────────────────────────────────────
 COPY --from=go-builder /torch /usr/local/bin/torch

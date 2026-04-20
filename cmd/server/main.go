@@ -27,12 +27,16 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+// buildTime is injected at build time via -ldflags "-X main.buildTime=..."
+var buildTime = "dev"
+
 func main() {
 	logLevel := slog.LevelInfo
 	if os.Getenv("LOG_LEVEL") == "debug" {
 		logLevel = slog.LevelDebug
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
+	slog.Info("torch starting", "build", buildTime)
 
 	redisAddr      := getEnv("REDIS_ADDR", "redis:6379")
 	dbPath         := getEnv("DB_PATH", "/data/torch.db")
@@ -165,8 +169,7 @@ func main() {
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		fmt.Fprintf(w, `{"status":"ok","build":%q}`, buildTime)
 	})
 
 	// Webhook — no auth, uses per-user HMAC secret; account_id in path

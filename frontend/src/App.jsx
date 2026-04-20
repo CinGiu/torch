@@ -475,13 +475,36 @@ function SetupWizard({ config, setConfig, onLaunch, launching, onLogout, auth })
                 <p style={{ margin: "-4px 0 16px", fontSize: 13, color: colors.muted, fontFamily: mono }}>
                   At least one agent uses <span style={{ color: colors.cyan }}>opencode</span>. Paste your <span style={{ color: colors.cyan }}>opencode.json</span> here — it will be injected into every workspace before agents run. <span style={{ color: colors.dim }}>permission.* = allow is added automatically.</span>
                 </p>
+                
+                <div style={{ margin: "0 0 16px", padding: "12px 14px", background: `linear-gradient(135deg, ${colors.input} 0%, ${colors.border} 100%)`, borderRadius: 8, border: `1px solid ${colors.cyan}33` }}>
+                  <p style={{ margin: "0 0 8px", fontSize: 13, color: colors.text, fontFamily: mono }}>
+                    <span style={{ color: colors.cyan }}>⚡ Tip:</span> Enable <span style={{ color: colors.cyan, fontFamily: mono }}>OhMyOpenCode</span> plugin for multi-agent orchestration
+                  </p>
+                  <p style={{ margin: "0 0 10px", fontSize: 12, color: colors.muted, fontFamily: mono, lineHeight: 1.5 }}>
+                    Add <span style={{ color: colors.green, fontFamily: mono, background: colors.background, padding: "2px 6px", borderRadius: 4 }}>"plugins": ["oh-my-opencode"]</span> to enable parallel agents, LSP tools, and built-in MCPs.
+                  </p>
+                  <details style={{ fontSize: 12, color: colors.dim, fontFamily: mono }}>
+                    <summary style={{ cursor: "pointer", color: colors.cyan }}>Show example</summary>
+                    <pre style={{ margin: "8px 0 0", padding: 10, background: colors.background, borderRadius: 6, overflow: "auto", fontSize: 11 }}>
+{`{
+  "plugins": ["oh-my-opencode"],
+  "provider": {
+    "name": "anthropic",
+    "apiKey": "sk-ant-..."
+  },
+  "model": "claude-sonnet-4-20250514"
+}`}
+                    </pre>
+                  </details>
+                </div>
+                
                 <Field
                   label="opencode.json"
                   value={config.pipeline.opencode_config || ""}
                   onChange={setPipeline("opencode_config")}
                   rows={8}
                   isCode
-                  placeholder={'{\n  "provider": {\n    "name": "openai",\n    "apiKey": "sk-..."\n  },\n  "model": "gpt-4o"\n}'}
+                  placeholder={'{\n  "plugins": ["oh-my-opencode"],\n  "provider": {\n    "name": "anthropic",\n    "apiKey": "sk-ant-..."\n  },\n  "model": "claude-sonnet-4-20250514"\n}'}
                 />
               </Card>
             )}
@@ -1711,6 +1734,16 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
   const setPipeline = (key)  => (val) => setConfig(c => ({ ...c, pipeline: { ...c.pipeline, [key]: val } }));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved]   = useState(false);
+  const [buildTime, setBuildTime] = useState(null);
+  useEffect(() => {
+    fetch("/health")
+      .then(r => r.json())
+      .then(d => {
+        setBuildTime(d.build ?? "unknown");
+        console.log("[torch] build:", d.build ?? "unknown");
+      })
+      .catch(() => {});
+  }, []);
 
   const saveSettings = async () => {
     setSaving(true);
@@ -1739,7 +1772,14 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
                 <div style={{ width: 8, height: 8, borderRadius: "50%", background: colors.green, boxShadow: `0 0 10px ${colors.green}`, animation: "pulse 2s infinite" }} />
                 <span style={{ fontSize: 12, letterSpacing: "0.2em", color: colors.green, textTransform: "uppercase", fontFamily: mono }}>live</span>
               </div>
-              <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, color: colors.white, letterSpacing: "-0.02em" }}>Torch</h1>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, color: colors.white, letterSpacing: "-0.02em" }}>Torch</h1>
+                {buildTime && (
+                  <span style={{ fontSize: 11, fontFamily: mono, color: colors.dim, letterSpacing: "0.04em" }}>
+                    build {buildTime}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
@@ -1939,15 +1979,38 @@ function Dashboard({ config, setConfig, onStop, onLaunch, launching, status, onL
                 <SDKPanel extraEnv={config.pipeline.extra_env || {}} onChange={setPipeline("extra_env")} />
                 <ExtraEnvEditor value={config.pipeline.extra_env || {}} onChange={setPipeline("extra_env")} />
                 {Object.values(config.agents).some(a => a.cli === "opencode") && (
-                  <Input
-                    label="Opencode Config (opencode.json)"
-                    value={config.pipeline.opencode_config || ""}
-                    onChange={setPipeline("opencode_config")}
-                    rows={10}
-                    isCode
-                    placeholder={'{\n  "provider": { ... },\n  "model": "vllm/vllm/mimir"\n}'}
-                    hint="Injected into each workspace. All 3 agents share the same file."
-                  />
+                  <div>
+                    <div style={{ margin: "0 0 16px", padding: "12px 14px", background: `linear-gradient(135deg, ${colors.input} 0%, ${colors.border} 100%)`, borderRadius: 8, border: `1px solid ${colors.cyan}33` }}>
+                      <p style={{ margin: "0 0 8px", fontSize: 13, color: colors.text, fontFamily: mono }}>
+                        <span style={{ color: colors.cyan }}>⚡ New:</span> Enable <span style={{ color: colors.cyan, fontFamily: mono }}>OhMyOpenCode</span> plugin for multi-agent orchestration
+                      </p>
+                      <p style={{ margin: "0 0 10px", fontSize: 12, color: colors.muted, fontFamily: mono, lineHeight: 1.5 }}>
+                        Add <span style={{ color: colors.green, fontFamily: mono, background: colors.background, padding: "2px 6px", borderRadius: 4 }}>"plugins": ["oh-my-opencode"]</span> to enable parallel agents, LSP tools, and built-in MCPs.
+                      </p>
+                      <details style={{ fontSize: 12, color: colors.dim, fontFamily: mono }}>
+                        <summary style={{ cursor: "pointer", color: colors.cyan }}>Show example</summary>
+                        <pre style={{ margin: "8px 0 0", padding: 10, background: colors.background, borderRadius: 6, overflow: "auto", fontSize: 11 }}>
+{`{
+  "plugins": ["oh-my-opencode"],
+  "provider": {
+    "name": "anthropic",
+    "apiKey": "sk-ant-..."
+  },
+  "model": "claude-sonnet-4-20250514"
+}`}
+                        </pre>
+                      </details>
+                    </div>
+                    <Input
+                      label="Opencode Config (opencode.json)"
+                      value={config.pipeline.opencode_config || ""}
+                      onChange={setPipeline("opencode_config")}
+                      rows={10}
+                      isCode
+                      placeholder={'{\n  "plugins": ["oh-my-opencode"],\n  "provider": { ... },\n  "model": "vllm/vllm/mimir"\n}'}
+                      hint="Injected into each workspace. All 3 agents share the same file."
+                    />
+                  </div>
                 )}
                 <div style={{ marginTop: spacing.lg }}>
                   <label style={{ 
